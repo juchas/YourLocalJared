@@ -21,7 +21,7 @@ EMBEDDING_MODEL = os.getenv("YLJ_EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 EMBEDDING_DIMENSION = int(os.getenv("YLJ_EMBEDDING_DIMENSION", "384"))
 
 # LLM
-LLM_MODEL = os.getenv("YLJ_LLM_MODEL", "mistralai/Mistral-7B-Instruct-v0.3")
+LLM_MODEL = os.getenv("YLJ_LLM_MODEL", "mistral")
 LLM_MAX_NEW_TOKENS = int(os.getenv("YLJ_LLM_MAX_NEW_TOKENS", "512"))
 LLM_TEMPERATURE = float(os.getenv("YLJ_LLM_TEMPERATURE", "0.7"))
 

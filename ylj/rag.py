@@ -13,14 +13,6 @@ def query(question: str, top_k: int | None = None) -> dict:
     query_embedding = embed_query(question)
     results = search(query_embedding, k)
 
-    if not results:
-        return {
-            "answer": "No documents have been ingested yet. "
-                      "Please add files to your documents folder and run ingestion first.\n\n"
-                      "```\npython start.py --ingest --dir ./documents\n```",
-            "sources": [],
-        }
-
     answer = generate(question, results)
 
     return {

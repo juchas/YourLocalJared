@@ -14,6 +14,7 @@ SKIP_DIRS = {
     "node_modules", ".git", ".venv", "venv", "__pycache__", ".tox", ".nox",
     ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build",
     ".eggs", "*.egg-info", ".venv-openwebui", "qdrant_data",
+    "mlruns", "mlflow", "artifacts", ".ipynb_checkpoints",
 }
 
 
