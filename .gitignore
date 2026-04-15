@@ -1,3 +1,9 @@
+# YourLocalJared
+qdrant_data/
+models/
+.venv-openwebui/
+.webui_secret_key
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YourLocalJared — Setup</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #080c10; font-family: 'DM Mono', 'Fira Code', monospace; }
+  input[type="text"] { font-family: 'DM Mono', 'Fira Code', monospace; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #0f172a; }
+  ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ── Model Data ──────────────────────────────────────────
+const LLM_MODELS = {
+  "8": {
+    id: "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    label: "TinyLlama 1.1B",
+    size: "~2.2 GB",
+    why: "Lightweight and fast. Good for quick Q&A on tight RAM.",
+  },
+  "16": {
+    id: "mistralai/Mistral-7B-Instruct-v0.3",
+    label: "Mistral 7B Instruct",
+    size: "~14 GB",
+    why: "Best quality/size ratio. Strong reasoning and instruction following.",
+  },
+  "32": {
+    id: "mistralai/Mistral-7B-Instruct-v0.3",
+    label: "Mistral 7B Instruct",
+    size: "~14 GB",
+    why: "Runs comfortably with room for large context and embedding model.",
+  },
+  "64": {
+    id: "mistralai/Mixtral-8x7B-Instruct-v0.1",
+    label: "Mixtral 8x7B MoE",
+    size: "~93 GB",
+    why: "Mixture-of-experts. Frontier-level quality running fully local.",
+  },
+};
+
+const EMBEDDING_MODELS = [
+  {
+    id: "BAAI/bge-small-en-v1.5",
+    label: "BGE Small",
+    dims: 384,
+    size: "~130 MB",
+    quality: "Good",
+    why: "Fast and lightweight. Great for most document collections.",
+  },
+  {
+    id: "BAAI/bge-base-en-v1.5",
+    label: "BGE Base",
+    dims: 768,
+    size: "~440 MB",
+    quality: "Better",
+    why: "Stronger semantic understanding. Recommended for complex docs.",
+  },
+  {
+    id: "BAAI/bge-large-en-v1.5",
+    label: "BGE Large",
+    dims: 1024,
+    size: "~1.3 GB",
+    quality: "Best",
+    why: "Top-tier retrieval accuracy. Worth it if you have the RAM.",
+  },
+];
+
+const RAM_OPTIONS = [
+  { value: "8", label: "8 GB", sub: "minimum viable" },
+  { value: "16", label: "16 GB", sub: "sweet spot" },
+  { value: "32", label: "32 GB", sub: "power user" },
+  { value: "64", label: "64 GB+", sub: "beast mode" },
+];
+
+const STEPS = ["ram", "llm", "embedding", "folder", "review"];
+const STEP_LABELS = ["RAM", "LLM", "Embeddings", "Documents", "Launch"];
+
+// ── Components ──────────────────────────────────────────
+function ProgressBar({ step }) {
+  return (
+    <div style={{ marginBottom: "32px" }}>
+      <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
+        {STEPS.map((s, i) => (
+          <div key={s} style={{
+            height: "3px", flex: 1, borderRadius: "2px",
+            background: i <= step ? "#fbbf24" : "#1e293b",
+            transition: "background 0.4s ease",
+          }} />
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        {STEP_LABELS.map((label, i) => (
+          <span key={label} style={{
+            fontSize: "10px", letterSpacing: "0.08em",
+            color: i <= step ? "#fbbf24" : "#334155",
+            transition: "color 0.3s",
+          }}>{label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StepLabel({ number, text }) {
+  return (
+    <p style={{ color: "#94a3b8", fontSize: "13px", marginBottom: "20px", letterSpacing: "0.05em" }}>
+      {number} / {text}
+    </p>
+  );
+}
+
+function BackButton({ onClick }) {
+  return (
+    <button onClick={onClick} style={{
+      background: "none", border: "none", color: "#334155",
+      fontSize: "12px", marginTop: "20px", cursor: "pointer",
+      letterSpacing: "0.05em", padding: 0,
+    }}>
+      &larr; back
+    </button>
+  );
+}
+
+function Card({ children, highlighted, onClick, onMouseEnter, onMouseLeave, hovered }) {
+  return (
+    <div onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={{
+      background: hovered ? "#fbbf2410" : "#0f172a",
+      border: `1px solid ${highlighted ? "#fbbf2466" : hovered ? "#fbbf2440" : "#1e293b"}`,
+      borderRadius: "10px", padding: "20px",
+      cursor: onClick ? "pointer" : "default",
+      transition: "all 0.18s ease",
+      transform: hovered ? "translateY(-1px)" : "none",
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function Badge({ icon, label }) {
+  return (
+    <span style={{
+      background: "#fbbf2415", border: "1px solid #fbbf2430",
+      color: "#fbbf24", fontSize: "11px", padding: "4px 10px",
+      borderRadius: "20px", letterSpacing: "0.06em",
+    }}>
+      {icon} {label}
+    </span>
+  );
+}
+
+// ── Main App ────────────────────────────────────────────
+function App() {
+  const [step, setStep] = useState(0);
+  const [ram, setRam] = useState(null);
+  const [llm, setLlm] = useState(null);
+  const [embedding, setEmbedding] = useState(null);
+  const [folder, setFolder] = useState("./documents");
+  const [hovered, setHovered] = useState(null);
+  const [installing, setInstalling] = useState(false);
+  const [installStatus, setInstallStatus] = useState("");
+  const [systemInfo, setSystemInfo] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/setup/system-info")
+      .then(r => r.json())
+      .then(setSystemInfo)
+      .catch(() => {});
+  }, []);
+
+  const ramLabel = RAM_OPTIONS.find(r => r.value === ram)?.label;
+  const llmModel = llm || (ram ? LLM_MODELS[ram] : null);
+  const embModel = embedding || EMBEDDING_MODELS[0];
+
+  const handleApply = async () => {
+    setInstalling(true);
+    setInstallStatus("Saving configuration...");
+    try {
+      const config = {
+        llm_model: llmModel.id,
+        embedding_model: embModel.id,
+        embedding_dimension: embModel.dims,
+        documents_dir: folder,
+      };
+      const res = await fetch("/api/setup/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (data.status === "ok") {
+        setInstallStatus("Configuration saved! Downloading models...");
+        // Poll for download status
+        const poll = setInterval(async () => {
+          try {
+            const s = await fetch("/api/setup/status").then(r => r.json());
+            setInstallStatus(s.message);
+            if (s.done) {
+              clearInterval(poll);
+              setInstalling(false);
+              setInstallStatus("ready");
+            }
+          } catch { /* keep polling */ }
+        }, 3000);
+      }
+    } catch (e) {
+      setInstallStatus("Error: " + e.message);
+      setInstalling(false);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#080c10",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "'DM Mono', 'Fira Code', monospace",
+      padding: "24px", position: "relative", overflow: "hidden",
+    }}>
+      {/* Grid background */}
+      <div style={{
+        position: "absolute", inset: 0, pointerEvents: "none",
+        backgroundImage: "linear-gradient(rgba(251,191,36,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(251,191,36,0.03) 1px, transparent 1px)",
+        backgroundSize: "40px 40px",
+      }} />
+      {/* Glow */}
+      <div style={{
+        position: "absolute", top: "20%", left: "50%",
+        transform: "translateX(-50%)", width: "600px", height: "300px",
+        background: "radial-gradient(ellipse, rgba(251,191,36,0.06) 0%, transparent 70%)",
+        pointerEvents: "none",
+      }} />
+
+      <div style={{ width: "100%", maxWidth: "580px", position: "relative", zIndex: 1 }}>
+        {/* Header */}
+        <div style={{ marginBottom: "36px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+            <span style={{ fontSize: "22px" }}>&#129433;</span>
+            <span style={{ color: "#fbbf24", fontSize: "13px", letterSpacing: "0.15em", textTransform: "uppercase" }}>
+              YourLocalJared
+            </span>
+          </div>
+          <h1 style={{
+            color: "#f8fafc", fontSize: "clamp(22px, 5vw, 30px)",
+            fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1.2,
+          }}>
+            Set up your<br /><span style={{ color: "#fbbf24" }}>local RAG system</span>
+          </h1>
+          <p style={{ color: "#475569", fontSize: "13px", marginTop: "10px", lineHeight: 1.6 }}>
+            {systemInfo
+              ? `Detected: ${systemInfo.ram_gb} GB RAM, ${systemInfo.device} — let's pick your models.`
+              : "Answer a few questions to configure your models and documents."}
+          </p>
+        </div>
+
+        <ProgressBar step={step} />
+
+        {/* ── Step 0: RAM ── */}
+        {step === 0 && (
+          <div>
+            <StepLabel number="01" text="HOW MUCH RAM DOES YOUR MACHINE HAVE?" />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              {RAM_OPTIONS.map(opt => (
+                <Card key={opt.value}
+                  hovered={hovered === "ram-" + opt.value}
+                  highlighted={systemInfo && Math.abs(parseInt(opt.value) - systemInfo.ram_gb) < 8}
+                  onMouseEnter={() => setHovered("ram-" + opt.value)}
+                  onMouseLeave={() => setHovered(null)}
+                  onClick={() => { setRam(opt.value); setLlm(LLM_MODELS[opt.value]); setStep(1); }}
+                >
+                  <div style={{ color: "#f8fafc", fontSize: "20px", fontWeight: 700, letterSpacing: "-0.02em" }}>
+                    {opt.label}
+                  </div>
+                  <div style={{ color: "#475569", fontSize: "11px", marginTop: "4px", letterSpacing: "0.08em" }}>
+                    {opt.sub}
+                    {systemInfo && Math.abs(parseInt(opt.value) - systemInfo.ram_gb) < 8 &&
+                      <span style={{ color: "#fbbf24", marginLeft: "6px" }}>&larr; detected</span>}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 1: LLM ── */}
+        {step === 1 && (
+          <div>
+            <StepLabel number="02" text="CHOOSE YOUR LLM" />
+            <div style={{ display: "flex", gap: "8px", marginBottom: "20px", flexWrap: "wrap" }}>
+              <Badge icon="&#128190;" label={ramLabel + " RAM"} />
+              <Badge icon="&#129302;" label="RAG Pipeline" />
+            </div>
+
+            {/* Recommended model card */}
+            <div style={{
+              background: "#0f172a", border: "1px solid #fbbf2430",
+              borderRadius: "14px", padding: "24px", marginBottom: "12px",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
+                <div>
+                  <div style={{ color: "#fbbf24", fontSize: "17px", fontWeight: 700 }}>{LLM_MODELS[ram].label}</div>
+                  <div style={{ color: "#475569", fontSize: "11px", marginTop: "2px" }}>
+                    {LLM_MODELS[ram].size} &middot; {LLM_MODELS[ram].id}
+                  </div>
+                </div>
+                <span style={{
+                  background: "#22c55e15", border: "1px solid #22c55e30",
+                  color: "#22c55e", fontSize: "10px", padding: "4px 10px",
+                  borderRadius: "20px", letterSpacing: "0.1em", textTransform: "uppercase",
+                }}>&#10003; recommended</span>
+              </div>
+              <p style={{ color: "#64748b", fontSize: "13px", lineHeight: 1.6 }}>{LLM_MODELS[ram].why}</p>
+            </div>
+
+            {/* All LLM options */}
+            <p style={{ color: "#334155", fontSize: "11px", letterSpacing: "0.06em", margin: "16px 0 10px" }}>
+              OR CHOOSE ANOTHER:
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {Object.entries(LLM_MODELS).filter(([k]) => k !== ram).map(([k, m]) => (
+                <Card key={k}
+                  hovered={hovered === "llm-" + k}
+                  onMouseEnter={() => setHovered("llm-" + k)}
+                  onMouseLeave={() => setHovered(null)}
+                  onClick={() => { setLlm(m); setStep(2); }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ color: "#f8fafc", fontSize: "14px", fontWeight: 600 }}>{m.label}</div>
+                      <div style={{ color: "#475569", fontSize: "11px", marginTop: "2px" }}>{m.size} &middot; {m.id}</div>
+                    </div>
+                    {parseInt(k) > parseInt(ram) && (
+                      <span style={{ color: "#ef4444", fontSize: "10px", letterSpacing: "0.06em" }}>may not fit</span>
+                    )}
+                  </div>
+                </Card>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", gap: "12px", marginTop: "20px" }}>
+              <BackButton onClick={() => setStep(0)} />
+              <button onClick={() => { setLlm(LLM_MODELS[ram]); setStep(2); }} style={{
+                background: "#fbbf24", border: "none", color: "#080c10",
+                fontSize: "12px", padding: "8px 18px", borderRadius: "6px",
+                cursor: "pointer", letterSpacing: "0.05em", fontWeight: 600,
+                fontFamily: "'DM Mono', monospace",
+              }}>
+                use recommended &rarr;
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 2: Embedding ── */}
+        {step === 2 && (
+          <div>
+            <StepLabel number="03" text="CHOOSE YOUR EMBEDDING MODEL" />
+            <p style={{ color: "#475569", fontSize: "12px", marginBottom: "20px", lineHeight: 1.6 }}>
+              Embeddings turn your documents into searchable vectors. Bigger = more accurate retrieval, but uses more RAM.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {EMBEDDING_MODELS.map((m, i) => (
+                <Card key={m.id}
+                  hovered={hovered === "emb-" + m.id}
+                  highlighted={embedding?.id === m.id}
+                  onMouseEnter={() => setHovered("emb-" + m.id)}
+                  onMouseLeave={() => setHovered(null)}
+                  onClick={() => { setEmbedding(m); setStep(3); }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <span style={{ color: "#f8fafc", fontSize: "15px", fontWeight: 600 }}>{m.label}</span>
+                        <span style={{
+                          background: i === 0 ? "#22c55e15" : i === 1 ? "#3b82f615" : "#a855f715",
+                          border: `1px solid ${i === 0 ? "#22c55e30" : i === 1 ? "#3b82f630" : "#a855f730"}`,
+                          color: i === 0 ? "#22c55e" : i === 1 ? "#3b82f6" : "#a855f7",
+                          fontSize: "10px", padding: "2px 8px", borderRadius: "12px",
+                          letterSpacing: "0.06em",
+                        }}>{m.quality}</span>
+                      </div>
+                      <div style={{ color: "#475569", fontSize: "11px", marginTop: "4px" }}>
+                        {m.size} &middot; {m.dims}d &middot; {m.id}
+                      </div>
+                      <div style={{ color: "#64748b", fontSize: "12px", marginTop: "8px", lineHeight: 1.5 }}>
+                        {m.why}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+            <BackButton onClick={() => setStep(1)} />
+          </div>
+        )}
+
+        {/* ── Step 3: Folder ── */}
+        {step === 3 && (
+          <div>
+            <StepLabel number="04" text="WHERE ARE YOUR DOCUMENTS?" />
+            <p style={{ color: "#475569", fontSize: "12px", marginBottom: "20px", lineHeight: 1.6 }}>
+              Point to a folder with your PDF, DOCX, XLSX, PPTX, TXT, MD, or CSV files.
+              They'll be chunked, embedded, and stored locally for retrieval.
+            </p>
+            <div style={{
+              background: "#0f172a", border: "1px solid #1e293b",
+              borderRadius: "10px", padding: "20px",
+            }}>
+              <label style={{ color: "#94a3b8", fontSize: "11px", letterSpacing: "0.08em", display: "block", marginBottom: "10px" }}>
+                DOCUMENTS FOLDER PATH
+              </label>
+              <input
+                type="text"
+                value={folder}
+                onChange={e => setFolder(e.target.value)}
+                placeholder="./documents"
+                style={{
+                  width: "100%", background: "#080c10", border: "1px solid #1e293b",
+                  borderRadius: "8px", padding: "12px 16px", color: "#fbbf24",
+                  fontSize: "14px", outline: "none",
+                }}
+                onFocus={e => e.target.style.borderColor = "#fbbf2466"}
+                onBlur={e => e.target.style.borderColor = "#1e293b"}
+              />
+              <div style={{ color: "#334155", fontSize: "11px", marginTop: "8px" }}>
+                Supported: PDF, DOCX, XLSX, PPTX, TXT, MD, CSV
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "12px", marginTop: "20px" }}>
+              <BackButton onClick={() => setStep(2)} />
+              <button onClick={() => setStep(4)} style={{
+                background: "#fbbf24", border: "none", color: "#080c10",
+                fontSize: "12px", padding: "8px 18px", borderRadius: "6px",
+                cursor: "pointer", letterSpacing: "0.05em", fontWeight: 600,
+                fontFamily: "'DM Mono', monospace",
+              }}>
+                next &rarr;
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 4: Review ── */}
+        {step === 4 && installStatus !== "ready" && (
+          <div>
+            <StepLabel number="05" text="REVIEW & LAUNCH" />
+            <div style={{ display: "flex", gap: "8px", marginBottom: "24px", flexWrap: "wrap" }}>
+              <Badge icon="&#128190;" label={ramLabel} />
+              <Badge icon="&#129302;" label={llmModel.label} />
+              <Badge icon="&#128269;" label={embModel.label} />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "24px" }}>
+              {[
+                { label: "LLM Model", value: llmModel.id, sub: llmModel.size },
+                { label: "Embedding Model", value: embModel.id, sub: embModel.size + " \u00b7 " + embModel.dims + "d" },
+                { label: "Documents Folder", value: folder, sub: "will be scanned on ingest" },
+              ].map(item => (
+                <div key={item.label} style={{
+                  background: "#0f172a", border: "1px solid #1e293b",
+                  borderRadius: "10px", padding: "16px 20px",
+                }}>
+                  <div style={{ color: "#475569", fontSize: "10px", letterSpacing: "0.1em", marginBottom: "4px" }}>
+                    {item.label.toUpperCase()}
+                  </div>
+                  <div style={{ color: "#f8fafc", fontSize: "14px", fontWeight: 600 }}>{item.value}</div>
+                  <div style={{ color: "#334155", fontSize: "11px", marginTop: "2px" }}>{item.sub}</div>
+                </div>
+              ))}
+            </div>
+
+            {installing ? (
+              <div style={{
+                background: "#0f172a", border: "1px solid #fbbf2430",
+                borderRadius: "10px", padding: "20px", textAlign: "center",
+              }}>
+                <div style={{ marginBottom: "12px" }}>
+                  <div style={{
+                    display: "inline-block", width: "20px", height: "20px",
+                    border: "2px solid #1e293b", borderTopColor: "#fbbf24",
+                    borderRadius: "50%",
+                    animation: "spin 1s linear infinite",
+                  }} />
+                </div>
+                <div style={{ color: "#fbbf24", fontSize: "13px" }}>{installStatus}</div>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: "12px" }}>
+                <BackButton onClick={() => setStep(3)} />
+                <button onClick={handleApply} style={{
+                  background: "#fbbf24", border: "none", color: "#080c10",
+                  fontSize: "13px", padding: "12px 28px", borderRadius: "8px",
+                  cursor: "pointer", letterSpacing: "0.05em", fontWeight: 700,
+                  fontFamily: "'DM Mono', monospace", flex: 1,
+                  transition: "all 0.18s",
+                }}
+                  onMouseEnter={e => e.target.style.background = "#f59e0b"}
+                  onMouseLeave={e => e.target.style.background = "#fbbf24"}
+                >
+                  Apply & Download Models &#x2192;
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Done ── */}
+        {installStatus === "ready" && (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: "48px", marginBottom: "16px" }}>&#129433;</div>
+            <h2 style={{ color: "#f8fafc", fontSize: "24px", fontWeight: 700, marginBottom: "8px" }}>
+              You're all set!
+            </h2>
+            <p style={{ color: "#64748b", fontSize: "13px", marginBottom: "32px", lineHeight: 1.6 }}>
+              Models are downloaded and config is saved.<br />
+              Restart the server to apply changes.
+            </p>
+            <div style={{
+              background: "#0f172a", border: "1px solid #1e293b",
+              borderRadius: "10px", padding: "16px 20px", marginBottom: "16px",
+            }}>
+              <div style={{ color: "#475569", fontSize: "10px", letterSpacing: "0.1em", marginBottom: "8px" }}>
+                NEXT STEPS
+              </div>
+              <div style={{ color: "#94a3b8", fontSize: "12px", lineHeight: 2, textAlign: "left" }}>
+                1. Add documents to <code style={{ color: "#fbbf24" }}>{folder}</code><br />
+                2. Restart: <code style={{ color: "#fbbf24" }}>python start.py --ingest</code><br />
+                3. Open: <code style={{ color: "#fbbf24" }}>http://localhost:8080</code>
+              </div>
+            </div>
+            <a href="http://localhost:8080" style={{
+              display: "inline-block", background: "#fbbf24", color: "#080c10",
+              fontSize: "13px", padding: "12px 32px", borderRadius: "8px",
+              textDecoration: "none", fontWeight: 700, letterSpacing: "0.05em",
+              fontFamily: "'DM Mono', monospace",
+            }}>
+              Open YourLocalJared &#x2192;
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
