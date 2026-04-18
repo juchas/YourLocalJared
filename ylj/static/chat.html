@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>YourLocalJared — Setup</title>
+<title>YourLocalJared — Chat</title>
 
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
@@ -15,7 +15,6 @@
 
 <style>
   :root {
-    /* Light YourJared palette */
     --bg: #ffffff;
     --bg-alt: #fafafa;
     --bg-hi: #f4f4f4;
@@ -25,15 +24,13 @@
     --text-dim: #666666;
     --text-dimmer: #999999;
     --text-faintest: #cccccc;
-    --accent: #18c964;        /* YourJared green */
+    --accent: #18c964;
     --accent-hi: #11a851;
     --accent-dim: #18c96412;
     --accent-border: #18c96440;
     --accent-row: #18c9641a;
-    --ok: #18c964;
     --warn: #e8553b;
-    --info: #3b82f6;
-    --mono: 'JetBrains Mono', 'DM Mono', ui-monospace, monospace;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
@@ -51,46 +48,49 @@
   ::-webkit-scrollbar-thumb:hover { background: #a3a3a3; }
   button, input, textarea { font-family: inherit; color: inherit; }
   button { cursor: pointer; border: none; background: none; padding: 0; }
-  input[type="text"] { outline: none; }
-  code { font-family: var(--mono); }
+  input[type="text"], textarea { outline: none; }
+  textarea { resize: none; }
 
   @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
   @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-  @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
   @keyframes slideIn { from { transform: translateX(-4px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes dot-bounce {
+    0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+    40% { transform: translateY(-4px); opacity: 1; }
+  }
+  /* Hide shortcut hints on narrow viewports to avoid wrapping */
+  @media (max-width: 1100px) {
+    .shortcut-hint { display: none !important; }
+  }
 </style>
 <template id="__bundler_thumbnail" data-bg-color="#0a0a0a">
   <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
-    <rect x="300" y="200" width="600" height="400" rx="12" fill="#141414" stroke="#2a2a2a" stroke-width="2"/>
-    <rect x="340" y="250" width="120" height="12" rx="2" fill="#f5b544"/>
-    <rect x="340" y="280" width="400" height="8" rx="2" fill="#3a3a3a"/>
-    <rect x="340" y="300" width="340" height="8" rx="2" fill="#3a3a3a"/>
-    <rect x="340" y="380" width="520" height="80" rx="6" fill="#1c1c1c" stroke="#2a2a2a"/>
-    <rect x="340" y="500" width="140" height="36" rx="4" fill="#f5b544"/>
-    <text x="600" y="160" text-anchor="middle" font-family="monospace" font-size="22" font-weight="700" fill="#f5b544">yourlocaljared</text>
-    <text x="600" y="185" text-anchor="middle" font-family="monospace" font-size="11" fill="#7a7a7a" letter-spacing="2">SETUP · LOCAL RAG</text>
+    <rect x="200" y="150" width="800" height="500" rx="12" fill="#141414" stroke="#2a2a2a" stroke-width="2"/>
+    <rect x="240" y="200" width="300" height="40" rx="6" fill="#1c1c1c"/>
+    <rect x="260" y="214" width="180" height="12" rx="2" fill="#3a3a3a"/>
+    <rect x="560" y="260" width="400" height="40" rx="6" fill="#f5b544"/>
+    <rect x="580" y="274" width="260" height="12" rx="2" fill="#1a1a1a"/>
+    <rect x="240" y="320" width="500" height="60" rx="6" fill="#1c1c1c"/>
+    <rect x="260" y="334" width="440" height="10" rx="2" fill="#3a3a3a"/>
+    <rect x="260" y="352" width="380" height="10" rx="2" fill="#3a3a3a"/>
+    <rect x="240" y="580" width="720" height="44" rx="6" fill="#1c1c1c" stroke="#2a2a2a"/>
+    <text x="600" y="110" text-anchor="middle" font-family="monospace" font-size="22" font-weight="700" fill="#f5b544">yourlocaljared</text>
+    <text x="600" y="135" text-anchor="middle" font-family="monospace" font-size="11" fill="#7a7a7a" letter-spacing="2">CHAT · LOCAL RAG</text>
   </svg>
 </template>
 </head>
 <body>
 <div id="root"></div>
 
-<script type="text/babel" data-presets="react" src="src/data.jsx"></script>
 <script type="text/babel" data-presets="react" src="src/primitives.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/logo.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/shell.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/screens-welcome.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/screens-hardware.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/screens-folders.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/screens-filetypes.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/screens-models.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/screens-install.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/screens-ingest.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/screens-test.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/screens-handoff.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/tweaks.jsx"></script>
-<script type="text/babel" data-presets="react" src="src/app.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/chat-logo.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/chat-data.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/chat-sidebar.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/chat-messages.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/chat-composer.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/chat-sources.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/chat-app.jsx"></script>
 </body>
 </html>
