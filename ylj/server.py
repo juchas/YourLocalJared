@@ -16,6 +16,7 @@ import torch
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ylj.config import LLM_MODEL, SERVER_HOST, SERVER_PORT
@@ -24,6 +25,8 @@ from ylj.rag import query
 app = FastAPI(title="YourLocalJared RAG API")
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+app.mount("/src", StaticFiles(directory=STATIC_DIR / "src"), name="src")
 
 # ── Setup state (for tracking model downloads) ──────────
 _setup_status = {"done": True, "message": "idle"}
@@ -40,6 +43,12 @@ def root():
 def setup_page():
     """Serve the onboarding wizard."""
     return FileResponse(STATIC_DIR / "onboarding.html")
+
+
+@app.get("/chat")
+def chat_page():
+    """Serve the chat UI."""
+    return FileResponse(STATIC_DIR / "chat.html")
 
 
 @app.get("/api/setup/system-info")

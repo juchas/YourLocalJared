@@ -29,11 +29,11 @@ Staged plan to turn the React-in-Babel design prototypes in [ylj/static/](ylj/st
 
 ### Stage 0 — Serve from FastAPI (foundation)
 
-- [ ] Mount `StaticFiles` in [ylj/server.py](ylj/server.py) for `src/*.jsx` assets
-- [ ] Add `GET /chat` route returning `chat.html`
-- [ ] Drop the separate `python -m http.server` — everything on port 8000, same-origin (no CORS)
-- [ ] Add `.gitignore` entries for `__pycache__/`, `.venv/`, `qdrant_data/`, `.env`
-- [ ] Smoke test: both pages load at `:8000/setup` and `:8000/chat`
+- [x] Mount `StaticFiles` in [ylj/server.py](ylj/server.py) for `src/*.jsx` assets
+- [x] Add `GET /chat` route returning `chat.html`
+- [x] Drop the separate `python -m http.server` — everything on port 8000, same-origin (no CORS)
+- [x] Add `.gitignore` entries for `__pycache__/`, `.venv/`, `qdrant_data/`, `.env` (already present)
+- [ ] Smoke test: both pages load at `:8000/setup` and `:8000/chat` *(manual verification pending — requires FastAPI deps installed)*
 
 **Risk:** 🟢 low · **Est:** ~30 min
 
