@@ -8,12 +8,13 @@ import subprocess
 import threading
 import time
 import uuid
+from ipaddress import ip_address
 from pathlib import Path
 
 import psutil
 import torch
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -64,8 +65,17 @@ def system_info():
 
 
 @app.get("/api/setup/probe")
-def probe():
-    """Detailed hardware probe for the onboarding wizard."""
+def probe(request: Request):
+    """Detailed hardware probe for the onboarding wizard (localhost only)."""
+    host = request.client.host if request.client else None
+    try:
+        is_loopback = bool(host) and ip_address(host).is_loopback
+    except ValueError:
+        is_loopback = host == "localhost"
+
+    if not is_loopback:
+        raise HTTPException(status_code=403, detail="probe endpoint is localhost only")
+
     return probe_hardware()
 
 

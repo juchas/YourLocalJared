@@ -111,14 +111,14 @@ function ScreenHardware({ onNext, onBack }) {
     { icon: 'memory', label: 'memory',   value: `${data.ram.total_gb} GB`,                meta: `${data.ram.available_gb} GB available`,                          tone: 'ok' },
     { icon: 'zap',    label: 'gpu',      value: data.gpu.name,                            meta: data.cuda_available ? 'cuda' : data.mps_available ? 'metal · unified memory' : 'cpu only', tone: data.cuda_available || data.mps_available ? 'ok' : 'warn' },
     { icon: 'hdd',    label: 'storage',  value: `${data.disk.free_gb} GB free`,           meta: `of ${data.disk.total_gb} GB`,                                    tone: data.disk.free_gb > 20 ? 'ok' : 'warn' },
-    { icon: 'code',   label: 'python',   value: data.python.version,                      meta: 'interpreter ready',                                              tone: 'ok' },
+    { icon: 'terminal', label: 'python', value: data.python.version,                      meta: 'interpreter ready',                                              tone: 'ok' },
     { icon: 'zap',    label: 'os',       value: data.os.pretty,                           meta: data.os.machine,                                                  tone: 'ok' },
   ] : [
     { icon: 'cpu',    label: 'chip',     value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
     { icon: 'memory', label: 'memory',   value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
     { icon: 'zap',    label: 'gpu',      value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
     { icon: 'hdd',    label: 'storage',  value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
-    { icon: 'code',   label: 'python',   value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'terminal', label: 'python', value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
     { icon: 'zap',    label: 'os',       value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
   ];
 
