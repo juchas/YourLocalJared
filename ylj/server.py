@@ -140,7 +140,7 @@ def apply_setup(config: SetupConfig):
                 f"Downloading LLM ({config.llm_model})... This may take a while."
             )
             subprocess.run(
-                ["hf", "download", config.llm_model],
+                ["hf", "download", "--", config.llm_model],
                 check=True, capture_output=True,
             )
 
