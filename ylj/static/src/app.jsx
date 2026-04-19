@@ -34,8 +34,6 @@ function App() {
         })
         .then((d) => { if (!cancelled) setOllama(normalize(d)); })
         .catch(() => { if (!cancelled) setOllama(fallback); });
-        .then((d) => { if (!cancelled) setOllama(normalize(d)); })
-        .catch(() => { if (!cancelled) setOllama(fallback); });
     };
     check();
     const iv = setInterval(check, 10000);

@@ -47,9 +47,9 @@ class _StubClient:
 def test_generate_posts_correct_payload(monkeypatch):
     captured = {}
 
-    def handler(url, json):
+    def handler(url, request_json):
         captured["url"] = url
-        captured["json"] = json
+        captured["request_json"] = request_json
         return _StubResponse(200, {"message": {"content": "hello"}})
 
     monkeypatch.setattr(llm.httpx, "Client", lambda **kw: _StubClient(handler))
@@ -58,14 +58,14 @@ def test_generate_posts_correct_payload(monkeypatch):
 
     assert out == "hello"
     assert captured["url"].endswith("/api/chat")
-    assert captured["json"]["model"] == llm.LLM_MODEL
-    assert captured["json"]["stream"] is False
-    assert "context body" in captured["json"]["messages"][0]["content"]
-    assert "what?" in captured["json"]["messages"][0]["content"]
+    assert captured["request_json"]["model"] == llm.LLM_MODEL
+    assert captured["request_json"]["stream"] is False
+    assert "context body" in captured["request_json"]["messages"][0]["content"]
+    assert "what?" in captured["request_json"]["messages"][0]["content"]
 
 
 def test_generate_surfaces_daemon_error(monkeypatch):
-    def handler(url, json):
+    def handler(url, request_json):
         raise httpx.ConnectError("refused")
 
     monkeypatch.setattr(llm.httpx, "Client", lambda **kw: _StubClient(handler))
@@ -75,7 +75,7 @@ def test_generate_surfaces_daemon_error(monkeypatch):
 
 
 def test_generate_surfaces_model_missing(monkeypatch):
-    def handler(url, json):
+    def handler(url, request_json):
         return _StubResponse(404, text="model not found")
 
     monkeypatch.setattr(llm.httpx, "Client", lambda **kw: _StubClient(handler))
@@ -85,7 +85,7 @@ def test_generate_surfaces_model_missing(monkeypatch):
 
 
 def test_generate_surfaces_invalid_json(monkeypatch):
-    def handler(url, json):
+    def handler(url, request_json):
         return _StubResponse(200, text="<html>bad</html>", json_error=ValueError("bad"))
 
     monkeypatch.setattr(llm.httpx, "Client", lambda **kw: _StubClient(handler))
@@ -95,7 +95,7 @@ def test_generate_surfaces_invalid_json(monkeypatch):
 
 
 def test_generate_surfaces_missing_content(monkeypatch):
-    def handler(url, json):
+    def handler(url, request_json):
         return _StubResponse(200, {"message": {}})
 
     monkeypatch.setattr(llm.httpx, "Client", lambda **kw: _StubClient(handler))

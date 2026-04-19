@@ -60,15 +60,13 @@ def detect_gpu() -> tuple[dict, bool, bool]:
     return {"name": "none", "backend": "cpu"}, cuda, mps
 
 
-def recommend_model(ram_total_gb: float, has_accelerator: bool) -> str:
-    """Pick a sensible default LLM from available RAM and acceleration.
+def recommend_model(ram_total_gb: float) -> str:
+    """Pick a sensible default LLM from available RAM.
 
     Mirrors the tier buckets rendered in screens-hardware.jsx. The UI's
     "modest" tier (12-24 GB) still shows a 7B chip as ok, so we pick
-    qwen2.5:7b everywhere above the "limited" threshold. `has_accelerator`
-    is unused at this coarse level but kept for future tier refinement.
+    qwen2.5:7b everywhere above the "limited" threshold.
     """
-    del has_accelerator
     if ram_total_gb < 12:
         return "phi3.5:mini"
     return "qwen2.5:7b"
@@ -115,5 +113,5 @@ def probe(disk_path: str | Path | None = None) -> dict:
         "gpu": gpu_info,
         "cuda_available": cuda_available,
         "mps_available": mps_available,
-        "recommended_model": recommend_model(ram_total_gb, cuda_available or mps_available),
+        "recommended_model": recommend_model(ram_total_gb),
     }

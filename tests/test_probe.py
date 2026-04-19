@@ -38,7 +38,7 @@ def test_probe_shape():
 
 
 def test_recommend_model_uses_ui_breakpoints():
-    assert recommend_model(11.9, False) == "phi3.5:mini"  # limited
-    assert recommend_model(12.0, False) == "qwen2.5:7b"  # modest
-    assert recommend_model(24.0, False) == "qwen2.5:7b"  # capable
-    assert recommend_model(48.0, True) == "qwen2.5:7b"  # high
+    assert recommend_model(11.9) == "phi3.5:mini"  # limited
+    assert recommend_model(12.0) == "qwen2.5:7b"  # modest
+    assert recommend_model(24.0) == "qwen2.5:7b"  # capable
+    assert recommend_model(48.0) == "qwen2.5:7b"  # high
