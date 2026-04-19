@@ -8,6 +8,7 @@ function ScreenHardware({ onNext, onBack }) {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     const t0 = performance.now();
     const stamp = () => ((performance.now() - t0) / 1000).toFixed(2);
     const push = (msg, fg = 'var(--text-dim)') =>
@@ -21,7 +22,7 @@ function ScreenHardware({ onNext, onBack }) {
 
     push('starting probe…', 'var(--text-dimmer)');
 
-    fetch('/api/setup/probe')
+    fetch('/api/setup/probe', { signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -30,9 +31,7 @@ function ScreenHardware({ onNext, onBack }) {
         if (cancelled) return;
         setData(d);
         const steps = [
-          { msg: `os: ${d.os.pretty} (${d.os.machine})`, fg: 'var(--text-dim)' },
-          { msg: `chip: ${d.chip}`, fg: 'var(--accent-hi)' },
-          { msg: `cpu cores: ${d.cpu.cores_physical}p / ${d.cpu.cores_logical}l`, fg: 'var(--text-dim)' },
+          { msg: `chip: ${d.chip} · ${d.cpu.cores_physical}p / ${d.cpu.cores_logical}l`, fg: 'var(--accent-hi)' },
           { msg: `memory: ${d.ram.total_gb} GB total · ${d.ram.available_gb} GB available`, fg: 'var(--text-dim)' },
           {
             msg: d.cuda_available
@@ -44,6 +43,7 @@ function ScreenHardware({ onNext, onBack }) {
           },
           { msg: `disk: ${d.disk.free_gb} GB free / ${d.disk.total_gb} GB`, fg: 'var(--text-dim)' },
           { msg: `python ${d.python.version} · ready`, fg: 'var(--text-dim)' },
+          { msg: `os: ${d.os.pretty} (${d.os.machine})`, fg: 'var(--text-dim)' },
           { msg: 'probe complete.', fg: 'var(--accent-hi)' },
         ];
         let i = 0;
@@ -59,20 +59,38 @@ function ScreenHardware({ onNext, onBack }) {
         }, 180);
       })
       .catch((e) => {
+        if (e?.name === 'AbortError') return;
         if (cancelled) return;
         setError(String(e));
         push(`probe failed: ${e}`, 'var(--danger, #e66)');
         setDone(true);
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [nonce]);
 
-  const FALLBACK_TIER = { label: 'limited', chip7: 'slow', chip13: false, chip30: false, chip70: false, msg: 'low RAM — stick to small 3B–7B quantised models.' };
+  const FALLBACK_TIER = {
+    label: 'conservative',
+    chip7: 'slow',
+    chip13: false,
+    chip30: false,
+    chip70: false,
+    msg: 'probe failed — using conservative defaults.',
+  };
 
   const tier = (() => {
-    if (!data) return error ? FALLBACK_TIER : { label: 'probing', chip7: null, chip13: null, chip30: null, chip70: null, msg: '' };
-    const gb = data.ram.total_gb;
+    if (error) return FALLBACK_TIER;
+    if (!data) return { label: 'probing', chip7: null, chip13: null, chip30: null, chip70: null, msg: '' };
+    const totalGb = Number(data.ram.total_gb);
+    const availableGb = Number(data.ram.available_gb);
+    // Budget against what's actually free so we don't suggest models that
+    // will OOM under real memory pressure.
+    const gb = Number.isFinite(totalGb)
+      ? (Number.isFinite(availableGb) ? Math.min(totalGb, availableGb) : totalGb)
+      : availableGb;
     const accel = data.cuda_available || data.mps_available;
     if (gb >= 48 && accel) return { label: 'high', chip7: true, chip13: true, chip30: true, chip70: 'slow', msg: 'you can run 7B–30B comfortably; 70B usable but slow.' };
     if (gb >= 24) return { label: 'capable', chip7: true, chip13: true, chip30: 'slow', chip70: false, msg: 'you can run 7B–13B comfortably. 30B possible but slow.' };
@@ -93,15 +111,15 @@ function ScreenHardware({ onNext, onBack }) {
     { icon: 'memory', label: 'memory',   value: `${data.ram.total_gb} GB`,                meta: `${data.ram.available_gb} GB available`,                          tone: 'ok' },
     { icon: 'zap',    label: 'gpu',      value: data.gpu.name,                            meta: data.cuda_available ? 'cuda' : data.mps_available ? 'metal · unified memory' : 'cpu only', tone: data.cuda_available || data.mps_available ? 'ok' : 'warn' },
     { icon: 'hdd',    label: 'storage',  value: `${data.disk.free_gb} GB free`,           meta: `of ${data.disk.total_gb} GB`,                                    tone: data.disk.free_gb > 20 ? 'ok' : 'warn' },
-    { icon: 'code',   label: 'python',   value: data.python.version,                      meta: 'interpreter ready',                                              tone: 'ok' },
+    { icon: 'terminal', label: 'python', value: data.python.version,                      meta: 'interpreter ready',                                              tone: 'ok' },
     { icon: 'zap',    label: 'os',       value: data.os.pretty,                           meta: data.os.machine,                                                  tone: 'ok' },
   ] : [
-    { icon: 'cpu',    label: 'chip',     value: '…', meta: 'probing', tone: 'ok' },
-    { icon: 'memory', label: 'memory',   value: '…', meta: 'probing', tone: 'ok' },
-    { icon: 'zap',    label: 'gpu',      value: '…', meta: 'probing', tone: 'ok' },
-    { icon: 'hdd',    label: 'storage',  value: '…', meta: 'probing', tone: 'ok' },
-    { icon: 'code',   label: 'python',   value: '…', meta: 'probing', tone: 'ok' },
-    { icon: 'zap',    label: 'os',       value: '…', meta: 'probing', tone: 'ok' },
+    { icon: 'cpu',    label: 'chip',     value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'memory', label: 'memory',   value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'zap',    label: 'gpu',      value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'hdd',    label: 'storage',  value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'terminal', label: 'python', value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'zap',    label: 'os',       value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
   ];
 
   const reprobe = () => setNonce((n) => n + 1);
@@ -131,8 +149,8 @@ function ScreenHardware({ onNext, onBack }) {
             const probed = data && progress > i;
             const failed = !data && error;
             return (
-              <Row key={r.label} accent={probed ? 'var(--accent)' : 'var(--border-hi)'}>
-                <Icon name={r.icon} size={14} style={{ color: probed ? 'var(--accent-hi)' : 'var(--text-dimmer)' }} />
+              <Row key={r.label} accent={probed ? 'var(--accent)' : error ? 'var(--warn)' : 'var(--border-hi)'}>
+                <Icon name={r.icon} size={14} style={{ color: probed ? 'var(--accent-hi)' : error ? 'var(--warn)' : 'var(--text-dimmer)' }} />
                 <span style={{ width: 90, fontSize: 10, color: 'var(--text-dimmer)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                   {r.label}
                 </span>
@@ -183,8 +201,8 @@ function ScreenHardware({ onNext, onBack }) {
         <div style={{ flex: 1 }} />
         <StepNav
           onBack={onBack}
-          onNext={error ? reprobe : onNext}
-          nextLabel={done && !error ? 'pick folders' : error ? 'retry' : 'probing…'}
+          onNext={onNext}
+          nextLabel={done ? 'pick folders' : 'probing…'}
           nextDisabled={!done}
         />
       </div>

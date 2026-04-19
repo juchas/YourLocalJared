@@ -4,17 +4,17 @@ Open WebUI connects to this as if it were an OpenAI API.
 Includes an onboarding wizard at /setup for first-time configuration.
 """
 
-import json
 import subprocess
 import threading
 import time
 import uuid
+from ipaddress import ip_address
 from pathlib import Path
 
 import psutil
 import torch
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -66,8 +66,26 @@ def system_info():
 
 
 @app.get("/api/setup/probe")
-def probe():
-    """Detailed hardware probe for the onboarding wizard."""
+def probe(request: Request):
+    """Detailed hardware probe for the onboarding wizard (localhost only)."""
+    client_host = request.client.host if request.client else None
+    request_host = request.url.hostname
+
+    def is_loopback_host(host: str | None) -> bool:
+        if host is None:
+            return False
+        try:
+            return ip_address(host).is_loopback
+        except ValueError:
+            return host in {"localhost", "127.0.0.1", "::1"}
+
+    # Guard on both transport peer and request host. This avoids relying
+    # solely on request.client.host, which may be loopback behind a reverse proxy.
+    is_loopback = is_loopback_host(client_host) and is_loopback_host(request_host)
+
+    if not is_loopback:
+        raise HTTPException(status_code=403, detail="probe endpoint is localhost only")
+
     return probe_hardware()
 
 
@@ -109,16 +127,18 @@ def apply_setup(config: SetupConfig):
             venv_python = project_root / ".venv" / "bin" / "python"
             python_cmd = str(venv_python) if venv_python.exists() else "python"
 
-            # Download embedding model
+            # Download embedding model. Pass the ID as argv so a crafted
+            # value can't break out of the `python -c` string — the endpoint
+            # is unauth'd and the server binds 0.0.0.0 by default.
             _setup_status["message"] = (
                 f"Downloading embedding model ({config.embedding_model})..."
             )
             download_snippet = (
-                "from sentence_transformers import SentenceTransformer; "
-                f"SentenceTransformer({json.dumps(config.embedding_model)})"
+                "import sys; from sentence_transformers import SentenceTransformer; "
+                "SentenceTransformer(sys.argv[1])"
             )
             subprocess.run(
-                [python_cmd, "-c", download_snippet],
+                [python_cmd, "-c", download_snippet, config.embedding_model],
                 check=True, capture_output=True,
             )
 
@@ -127,7 +147,7 @@ def apply_setup(config: SetupConfig):
                 f"Pulling LLM ({config.llm_model}) via Ollama... This may take a while."
             )
             subprocess.run(
-                ["ollama", "pull", config.llm_model],
+                ["ollama", "pull", "--", config.llm_model],
                 check=True, capture_output=True, timeout=600,
             )
 
