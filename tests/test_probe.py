@@ -18,13 +18,14 @@ def test_probe_shape():
 
     assert result["python"]["installed"] is True
     assert result["python"]["version"].count(".") >= 1
-    assert result["python"]["executable"]
+    assert "executable" not in result["python"]
 
     assert result["ram"]["total_gb"] > 0
     assert result["ram"]["available_gb"] >= 0
 
     assert result["disk"]["total_gb"] > 0
     assert result["disk"]["free_gb"] >= 0
+    assert "path" not in result["disk"]
 
     assert isinstance(result["cuda_available"], bool)
     assert isinstance(result["mps_available"], bool)

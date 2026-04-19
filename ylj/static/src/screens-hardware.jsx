@@ -43,7 +43,7 @@ function ScreenHardware({ onNext, onBack }) {
             fg: d.cuda_available || d.mps_available ? 'var(--accent-hi)' : 'var(--text-dim)',
           },
           { msg: `disk: ${d.disk.free_gb} GB free / ${d.disk.total_gb} GB`, fg: 'var(--text-dim)' },
-          { msg: `python ${d.python.version} · ${d.python.executable}`, fg: 'var(--text-dim)' },
+          { msg: `python ${d.python.version} · ready`, fg: 'var(--text-dim)' },
           { msg: 'probe complete.', fg: 'var(--accent-hi)' },
         ];
         let i = 0;
@@ -69,7 +69,7 @@ function ScreenHardware({ onNext, onBack }) {
   }, [nonce]);
 
   const tier = (() => {
-    if (!data) return { label: 'probing', chip7: false, chip13: false, chip30: false, chip70: false, msg: '' };
+    if (!data) return { label: 'probing', chip7: null, chip13: null, chip30: null, chip70: null, msg: '' };
     const gb = data.ram.total_gb;
     const accel = data.cuda_available || data.mps_available;
     if (gb >= 48 && accel) return { label: 'high', chip7: true, chip13: true, chip30: true, chip70: 'slow', msg: 'you can run 7B–30B comfortably; 70B usable but slow.' };
@@ -78,12 +78,20 @@ function ScreenHardware({ onNext, onBack }) {
     return { label: 'limited', chip7: 'slow', chip13: false, chip30: false, chip70: false, msg: 'low RAM — stick to small 3B–7B quantised models.' };
   })();
 
+  const chipLabel = (name, v) => {
+    if (v === null) return `${name} …`;
+    if (v === true) return `${name} ✓`;
+    if (v === 'slow') return `${name} · slow`;
+    return `${name} ✗`;
+  };
+  const chipTone = (v) => (v === true ? 'ok' : v === 'slow' ? 'warn' : undefined);
+
   const rows = data ? [
     { icon: 'cpu',    label: 'chip',     value: data.chip,                                meta: `${data.cpu.cores_physical}p / ${data.cpu.cores_logical}l cores`, tone: 'ok' },
     { icon: 'memory', label: 'memory',   value: `${data.ram.total_gb} GB`,                meta: `${data.ram.available_gb} GB available`,                          tone: 'ok' },
     { icon: 'zap',    label: 'gpu',      value: data.gpu.name,                            meta: data.cuda_available ? 'cuda' : data.mps_available ? 'metal · unified memory' : 'cpu only', tone: data.cuda_available || data.mps_available ? 'ok' : 'warn' },
     { icon: 'hdd',    label: 'storage',  value: `${data.disk.free_gb} GB free`,           meta: `of ${data.disk.total_gb} GB`,                                    tone: data.disk.free_gb > 20 ? 'ok' : 'warn' },
-    { icon: 'code',   label: 'python',   value: data.python.version,                      meta: data.python.executable,                                           tone: 'ok' },
+    { icon: 'code',   label: 'python',   value: data.python.version,                      meta: 'interpreter ready',                                              tone: 'ok' },
     { icon: 'zap',    label: 'os',       value: data.os.pretty,                           meta: data.os.machine,                                                  tone: 'ok' },
   ] : [
     { icon: 'cpu',    label: 'chip',     value: '…', meta: 'probing', tone: 'ok' },
@@ -158,17 +166,22 @@ function ScreenHardware({ onNext, onBack }) {
                     : 'probing hardware…'}
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
-                <Chip tone={tier.chip7 === true ? 'ok' : tier.chip7 === 'slow' ? 'warn' : undefined}>7b {tier.chip7 === true ? '✓' : tier.chip7 === 'slow' ? '· slow' : '✗'}</Chip>
-                <Chip tone={tier.chip13 === true ? 'ok' : tier.chip13 === 'slow' ? 'warn' : undefined}>13b {tier.chip13 === true ? '✓' : tier.chip13 === 'slow' ? '· slow' : '✗'}</Chip>
-                <Chip tone={tier.chip30 === true ? 'ok' : tier.chip30 === 'slow' ? 'warn' : undefined}>30b {tier.chip30 === true ? '✓' : tier.chip30 === 'slow' ? '· slow' : '✗'}</Chip>
-                <Chip tone={tier.chip70 === true ? 'ok' : tier.chip70 === 'slow' ? 'warn' : undefined}>70b {tier.chip70 === true ? '✓' : tier.chip70 === 'slow' ? '· very slow' : '✗'}</Chip>
+                <Chip tone={chipTone(tier.chip7)}>{chipLabel('7b', tier.chip7)}</Chip>
+                <Chip tone={chipTone(tier.chip13)}>{chipLabel('13b', tier.chip13)}</Chip>
+                <Chip tone={chipTone(tier.chip30)}>{chipLabel('30b', tier.chip30)}</Chip>
+                <Chip tone={chipTone(tier.chip70)}>{chipLabel('70b', tier.chip70)}</Chip>
               </div>
             </div>
           </div>
         </Panel>
 
         <div style={{ flex: 1 }} />
-        <StepNav onBack={onBack} onNext={onNext} nextLabel={done && !error ? 'pick folders' : error ? 'retry' : 'probing…'} nextDisabled={!done || !!error} />
+        <StepNav
+          onBack={onBack}
+          onNext={error ? reprobe : onNext}
+          nextLabel={done && !error ? 'pick folders' : error ? 'retry' : 'probing…'}
+          nextDisabled={!done}
+        />
       </div>
 
       <div style={{
