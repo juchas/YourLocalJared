@@ -10,8 +10,8 @@ function App() {
   const [folders, setFolders] = useState([]);
   const [ignores, setIgnores] = useState(IGNORES);
   const [fileTypes, setFileTypes] = useState(FILETYPES);
-  const [llmId, setLlmId] = useState('qwen2.5:7b');
-  const [embId, setEmbId] = useState('nomic-embed');
+  const [llmId, setLlmId] = useState('');
+  const [embId, setEmbId] = useState('');
   const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
   const [tweaksOpen, setTweaksOpen] = useState(false);
   const [ollama, setOllama] = useState({ running: null, version: null, models: [] });
@@ -55,6 +55,32 @@ function App() {
     return () => { cancelled = true; clearInterval(iv); };
   }, []);
 
+  // Resolve the wizard's initial model picks from backend config first,
+  // falling back to whatever entry is `rec: true` in the static catalog.
+  // Never hardcode a specific model id in the UI.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/config')
+      .then(r => r.ok ? r.json() : null)
+      .then(c => {
+        if (cancelled) return;
+        const recLlm = (LLMS.find(m => m.rec) || LLMS[0] || {}).id || '';
+        const recEmb = (EMBEDDERS.find(m => m.rec) || EMBEDDERS[0] || {}).id || '';
+        const cfgLlm = c && typeof c.llm_model === 'string' ? c.llm_model : '';
+        const cfgEmbHf = c && typeof c.embedding_model === 'string' ? c.embedding_model : '';
+        // Backend stores embedder by HF id; map back to the catalog short id.
+        const embFromCfg = EMBEDDERS.find(e => e.hfId === cfgEmbHf);
+        setLlmId(cfgLlm && LLMS.some(m => m.id === cfgLlm) ? cfgLlm : recLlm);
+        setEmbId(embFromCfg ? embFromCfg.id : recEmb);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLlmId((LLMS.find(m => m.rec) || LLMS[0] || {}).id || '');
+        setEmbId((EMBEDDERS.find(m => m.rec) || EMBEDDERS[0] || {}).id || '');
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => {
     const handler = (e) => {
       if (!e.data || typeof e.data !== 'object') return;
@@ -81,7 +107,7 @@ function App() {
       case 'install':  return <ScreenInstall  onNext={nextStep} onBack={backStep} llmId={llmId} embId={embId} />;
       case 'ingest':   return <ScreenIngest   onNext={nextStep} onBack={backStep} folders={folders} fileTypes={fileTypes} />;
       case 'test':     return <ScreenTest     onNext={nextStep} onBack={backStep} llmId={llmId} />;
-      case 'handoff':  return <ScreenHandoff  onBack={backStep} />;
+      case 'handoff':  return <ScreenHandoff  onBack={backStep} llmId={llmId} embId={embId} />;
       default: return null;
     }
   })();

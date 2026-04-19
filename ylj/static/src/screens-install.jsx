@@ -1,59 +1,109 @@
 function ScreenInstall({ onNext, onBack, llmId, embId }) {
   const llm = LLMS.find(m => m.id === llmId);
   const emb = EMBEDDERS.find(m => m.id === embId);
+
+  const [logs, setLogs] = useState([]);
   const [llmP, setLlmP] = useState(0);
   const [embP, setEmbP] = useState(0);
-  const [logs, setLogs] = useState([]);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    let l = 0, e = 0;
-    const lines = [
-      `ollama pull ${llm.id}`,
-      `pulling manifest…`,
-      `pulling ${(llm.sizeGB * 1024).toFixed(0)} MB · q4_K_M`,
-      `verifying sha256… ok`,
-      `writing to ~/.ollama/models/${llm.id}`,
-      `ollama pull ${emb.id}`,
-      `pulling manifest…`,
-      `pulling ${(emb.sizeGB * 1024).toFixed(0)} MB · embedding weights`,
-      `verifying sha256… ok`,
-      `writing to ~/.ollama/models/${emb.id}`,
-      `→ both models registered`,
-      `→ warming up inference server…`,
-      `✓ install complete`,
-    ];
-    let li = 0;
-    const log = setInterval(() => {
-      if (li < lines.length) {
-        const msg = lines[li];
-        if (typeof msg === 'string') {
-          setLogs(prev => [...prev, { t: (li * 0.35 + 0.1).toFixed(2), msg }]);
-        }
-        li++;
-      } else {
-        clearInterval(log);
-      }
-    }, 380);
+    if (!llm || !emb) {
+      setError('Missing LLM or embedding selection.');
+      setDone(true);
+      return;
+    }
 
-    const prog = setInterval(() => {
-      if (l < 100) { l += 2.5; setLlmP(Math.min(100, l)); }
-      else if (e < 100) { e += 8; setEmbP(Math.min(100, e)); }
-      else { clearInterval(prog); setDone(true); }
-    }, 110);
+    const t0 = performance.now();
+    const stamp = () => ((performance.now() - t0) / 1000).toFixed(2);
+    const append = (msg) => setLogs(prev => {
+      if (prev.length && prev[prev.length - 1].msg === msg) return prev;
+      return [...prev, { t: stamp(), msg }];
+    });
 
-    return () => { clearInterval(log); clearInterval(prog); };
+    let stopped = false;
+    let lastMsg = '';
+
+    append(`$ POST /api/setup/apply`);
+    append(`llm: ${llm.id}`);
+    append(`emb: ${emb.hfId} (${emb.dims}d)`);
+
+    fetch('/api/setup/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        llm_model: llm.id,
+        embedding_model: emb.hfId,
+        embedding_dimension: emb.dims,
+      }),
+    })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(() => append('install started — polling status…'))
+      .catch(e => {
+        if (stopped) return;
+        append(`apply failed: ${e.message || e}`);
+        setError(String(e.message || e));
+        setDone(true);
+        stopped = true;
+      });
+
+    // The backend updates a single `message` string; we poll, and any
+    // change becomes a new log line. Progress bars fill stage-by-stage
+    // from message text since the Ollama subprocess gives us no granular %.
+    const tick = () => {
+      if (stopped) return;
+      fetch('/api/setup/status')
+        .then(r => r.json())
+        .then(s => {
+          if (stopped) return;
+          const msg = s && typeof s.message === 'string' ? s.message : '';
+          if (msg && msg !== lastMsg) {
+            lastMsg = msg;
+            append(msg);
+            const lower = msg.toLowerCase();
+            if (lower.startsWith('error')) {
+              setError(msg);
+            } else if (lower.includes('embedding model')) {
+              setEmbP(p => Math.max(p, 50));
+            } else if (lower.includes('pulling llm') || lower.includes('ollama')) {
+              setEmbP(100);
+              setLlmP(p => Math.max(p, 50));
+            }
+          }
+          if (s && s.done) {
+            stopped = true;
+            const isErr = (msg || '').toLowerCase().startsWith('error');
+            if (!isErr) {
+              setEmbP(100);
+              setLlmP(100);
+              append('✓ install complete');
+            }
+            setDone(true);
+            return;
+          }
+          setTimeout(tick, 1000);
+        })
+        .catch(e => {
+          if (stopped) return;
+          append(`status poll failed: ${e.message || e}`);
+          setTimeout(tick, 2000);
+        });
+    };
+    setTimeout(tick, 600);
+
+    return () => { stopped = true; };
   }, []);
 
   return (
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
       <div style={{ flex: '1 1 55%', padding: '40px 48px', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
-        <SectionHeader num="06" label="downloading models" desc="pulling from the ollama registry. once done, models live on disk; no network required afterward." />
+        <SectionHeader num="06" label="downloading models" desc="ollama pulls the llm; sentence-transformers caches the embedder. ingest runs on the next step." />
 
         <div>
           {[
-            { name: llm.name, tag: llm.size, desc: llm.desc, sz: llm.sizeGB, p: llmP },
-            { name: emb.name, tag: `${emb.dims}-d`, desc: emb.desc, sz: emb.sizeGB, p: embP },
+            { name: llm ? llm.name : '—', tag: llm ? llm.size : '?',  desc: llm ? llm.desc : '', sz: llm ? llm.sizeGB : 0, p: llmP },
+            { name: emb ? emb.name : '—', tag: emb ? `${emb.dims}-d` : '?', desc: emb ? emb.desc : '', sz: emb ? emb.sizeGB : 0, p: embP },
           ].map((m, i) => {
             const complete = m.p >= 100;
             return (
@@ -78,47 +128,55 @@ function ScreenInstall({ onNext, onBack, llmId, embId }) {
                     <span style={{ fontSize: 11, color: 'var(--accent-hi)' }}>{m.tag}</span>
                     <span style={{ fontSize: 11, color: 'var(--text-dimmer)', flex: 1 }}>· {m.desc}</span>
                     <span style={{ fontSize: 11, color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>
-                      {complete ? `${m.sz} GB · done` : `${((m.p / 100) * m.sz).toFixed(2)} / ${m.sz} GB`}
+                      {complete ? `${m.sz} GB · done` : `~${m.sz} GB`}
                     </span>
                   </div>
-                  <ProgressBar value={m.p} shimmer={!complete} />
-                  <div style={{ display: 'flex', marginTop: 6, fontSize: 10, color: 'var(--text-dimmer)', letterSpacing: '0.06em' }}>
-                    <span>{complete ? '—' : '24 MB/s · cdn.ollama.com'}</span>
-                    <span style={{ flex: 1 }} />
-                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>{m.p.toFixed(0)}%</span>
-                  </div>
+                  <ProgressBar value={m.p} shimmer={!complete} tone={error ? 'warn' : 'accent'} />
                 </div>
               </div>
             );
           })}
         </div>
 
+        {error && (
+          <div style={{ marginTop: 18, padding: 14, border: '1px solid var(--warn, #c97d17)', background: 'rgba(201,125,23,0.08)' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--warn, #c97d17)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>install failed</div>
+            <div style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'var(--mono)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{error}</div>
+          </div>
+        )}
+
         <div style={{ flex: 1 }} />
-        <StepNav onBack={onBack} onNext={onNext} nextLabel={done ? 'start ingest' : 'downloading…'} nextDisabled={!done} />
+        <StepNav onBack={onBack} onNext={onNext} nextLabel={done && !error ? 'start ingest' : error ? 'fix and retry' : 'downloading…'} nextDisabled={!done || !!error} />
       </div>
 
       <div style={{ flex: '1 1 45%', borderLeft: '1px solid var(--border)', background: 'var(--bg-alt)', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
           <Icon name="terminal" size={12} style={{ color: 'var(--text-dim)' }} />
-          <span style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>ollama · stdout</span>
+          <span style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>backend · status</span>
           <div style={{ flex: 1 }} />
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: done ? 'var(--accent)' : 'var(--warn)', animation: done ? 'none' : 'pulse 1s infinite' }} />
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: error ? 'var(--warn, #c97d17)' : done ? 'var(--accent)' : 'var(--warn)',
+            animation: done ? 'none' : 'pulse 1s infinite',
+          }} />
         </div>
         <div style={{ flex: 1, padding: '14px 18px', overflow: 'auto', fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.9 }}>
           {logs.map((l, i) => {
             const msg = (l && typeof l.msg === 'string') ? l.msg : '';
-            const isCommand = msg.startsWith('ollama');
-            const isDone = msg.startsWith('✓') || msg.startsWith('→');
+            const isCommand = msg.startsWith('$');
+            const isOk = msg.startsWith('✓') || msg.startsWith('→');
+            const isErr = msg.toLowerCase().startsWith('error') || msg.includes('failed');
             return (
-              <div key={i} style={{ display: 'flex', gap: 10, animation: 'slideIn 0.2s' }}>
+              <div key={i} style={{ display: 'flex', gap: 10 }}>
                 <span style={{ color: 'var(--text-faintest)', width: 32 }}>{l && l.t}</span>
                 <span style={{ color: 'var(--text-faintest)' }}>│</span>
                 <span style={{
                   flex: 1,
-                  color: isCommand ? 'var(--text)' : isDone ? 'var(--accent-hi)' : 'var(--text-dim)',
+                  color: isErr ? 'var(--warn, #c97d17)' : isCommand ? 'var(--text)' : isOk ? 'var(--accent-hi)' : 'var(--text-dim)',
                   fontWeight: isCommand ? 600 : 400,
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                 }}>
-                  {isCommand && '$ '}{msg}
+                  {msg}
                 </span>
               </div>
             );

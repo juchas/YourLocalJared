@@ -33,27 +33,28 @@ Staged plan to turn the React-in-Babel design prototypes in [ylj/static/](ylj/st
 - [x] Add `GET /chat` route returning `chat.html`
 - [x] Drop the separate `python -m http.server` — everything on port 8000, same-origin (no CORS)
 - [x] Add `.gitignore` entries for `__pycache__/`, `.venv/`, `qdrant_data/`, `.env` (already present)
-- [ ] Smoke test: both pages load at `:8000/setup` and `:8000/chat` *(manual verification pending — requires FastAPI deps installed)*
+- [x] Smoke test: both pages load at `:8000/setup` and `:8000/chat`
 
 **Risk:** 🟢 low · **Est:** ~30 min
 
-### Stage 1 — Hardware probe (Screen 2)
+### Stage 1 — Hardware probe (Screen 2) ✅
 
-- [ ] `GET /api/setup/probe` returning `{os, chip, ram_total, ram_free, gpu, vram, disk_free}` (psutil + torch)
-- [ ] Wire [src/screens-hardware.jsx](ylj/static/src/screens-hardware.jsx) — replace mocked `logLines` with real data
-- [ ] Keep terminal-style typing animation, feed real values into it
-- [ ] "Re-probe" button calls the endpoint again
+- [x] `GET /api/setup/probe` returning `{os, chip, ram_total, ram_free, gpu, vram, disk_free}` (psutil + torch)
+- [x] Wire [src/screens-hardware.jsx](ylj/static/src/screens-hardware.jsx) — replace mocked `logLines` with real data
+- [x] Keep terminal-style typing animation, feed real values into it
+- [x] "Re-probe" button calls the endpoint again
+- [x] Tier recommendation reads VRAM (not just system RAM) so GPU boxes get accurate model-size chips
 
 **Risk:** 🟢 low · **Est:** 1–2h
 
-### Stage 2 — Folders browser (Screen 3)
+### Stage 2 — Folders browser (Screen 3) ✅
 
-- [ ] `GET /api/setup/list-dir?path=` → `{entries: [{name, path, is_dir, file_count, size_bytes}]}`
-- [ ] `POST /api/setup/scan` body `{folders, ignore}` → `{total_files, total_size}`
-- [ ] Gitignore-style ignore patterns (defaults: `node_modules`, `.git`, `.venv`, `__pycache__`, `dist`, `build`, `.DS_Store`)
-- [ ] Path-traversal safety (decide scope per cross-cutting question above)
-- [ ] Wire [src/screens-folders.jsx](ylj/static/src/screens-folders.jsx) — replace mocked `FOLDERS` fixture
-- [ ] Warning banner on folders >10k files
+- [x] `GET /api/setup/folders` → suggested home-dir folders, scanned with file/size/extension counts
+- [x] `POST /api/setup/scan-folder` body `{path}` → scan a user-provided path
+- [x] Gitignore-style ignore patterns via `ylj.documents.SKIP_DIRS` (`node_modules`, `.git`, `.venv`, `__pycache__`, `dist`, `build`, `qdrant_data`, etc.)
+- [x] Path-traversal safety: `safe_home_path()` confines enumeration under `$HOME`, rejects symlink escapes
+- [x] Wire [src/screens-folders.jsx](ylj/static/src/screens-folders.jsx) — `app.jsx` fetches on mount, screen calls `/api/setup/scan-folder` to add folders
+- [x] Per-folder caps to prevent UI stall: 50k files / depth 12 / 2s time budget; `warn` field carries the reason
 
 **Risk:** 🟡 med · **Est:** 3–4h
 
@@ -73,6 +74,18 @@ Staged plan to turn the React-in-Babel design prototypes in [ylj/static/](ylj/st
 - [ ] Wire [src/screens-models.jsx](ylj/static/src/screens-models.jsx)
 
 **Risk:** 🟢 low · **Est:** 2–3h
+
+### Stage 4.5 — Ollama precondition (gate before install)
+
+Detect-and-prompt, don't auto-install. Triggering an MSI/pkg/sh installer programmatically requires UAC/sudo on every platform and adds messy failure modes for marginal UX gain — the user has to click an elevation prompt anyway, so we just hand them the official installer and poll for the daemon.
+
+- [ ] `GET /api/setup/ollama-status` → `{installed, version, daemon_running, models}` (extends [ylj/llm.py:status()](ylj/llm.py#L99) with binary-on-PATH check)
+- [ ] New screen between Stage 4 (models picked) and Stage 5 (install): if daemon down, show platform-aware instructions + "Download Ollama" button → opens [ollama.com/download](https://ollama.com/download)
+- [ ] Poll `/api/setup/ollama-status` every 2s; auto-advance once `daemon_running: true`
+- [ ] If already up, skip the screen silently
+- [ ] Surface clear error if user picks a model in Stage 4 but Ollama is missing — no silent failure at Stage 5
+
+**Risk:** 🟢 low · **Est:** 1–2h
 
 ### Stage 5 — Install with SSE (Screen 6) — establishes SSE pattern
 

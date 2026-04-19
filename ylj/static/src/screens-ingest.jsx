@@ -1,53 +1,131 @@
 function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
-  const totalFiles = folders.filter(f => f.selected).reduce((a, b) => a + b.files, 0)
-    * (fileTypes.filter(t => t.on).length / fileTypes.length);
-  const targetFiles = Math.floor(totalFiles);
+  const selectedFolders = (folders || []).filter(f => f.selected);
+  const enabledExtensions = (fileTypes || [])
+    .filter(t => t.on)
+    .flatMap(t => t.extensions || []);
+
+  // Estimate before scan comes back — once the backend tells us the real
+  // count we swap to that. Keeps the ring gauge from snapping at zero on
+  // the first frame.
+  const estimatedFiles = selectedFolders.reduce((a, b) => a + (b.files || 0), 0)
+    * ((fileTypes || []).filter(t => t.on).length / Math.max(1, (fileTypes || []).length));
 
   const phases = ['scan', 'parse', 'chunk', 'embed', 'store'];
   const [phaseIdx, setPhaseIdx] = useState(0);
+  const [totalFiles, setTotalFiles] = useState(Math.max(1, Math.floor(estimatedFiles)));
   const [filesProcessed, setFilesProcessed] = useState(0);
   const [chunks, setChunks] = useState(0);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState(null);
   const [log, setLog] = useState([]);
-
-  const filenames = [
-    'notes/2024-q2-review.md', 'research/rag-papers.pdf', 'journal/2023-11.md',
-    'docs/onboarding-brief.docx', 'notes/ideas/embedding-arch.md',
-    'research/transformers-revisited.pdf', 'meetings/2024-03-14.md',
-    'notes/book-summaries/godel-escher-bach.md', 'docs/contracts/acme.pdf',
-    'journal/2024-01.md', 'notes/recipes/carbonara.md', 'research/retrieval.pdf',
-  ];
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const startRef = useRef(performance.now());
 
   useEffect(() => {
-    let step = 0;
-    const t = setInterval(() => {
-      step++;
-      setPhaseIdx(Math.min(4, Math.floor(step / 30)));
-      setFilesProcessed(p => {
-        const next = Math.min(targetFiles, p + Math.floor(Math.random() * 18) + 6);
-        return next;
-      });
-      setChunks(c => c + Math.floor(Math.random() * 60) + 30);
-      if (step % 3 === 0) {
-        const fn = filenames[Math.floor(Math.random() * filenames.length)];
-        setLog(l => [{
-          t: (step * 0.12).toFixed(2),
-          file: fn,
-          chunks: Math.floor(Math.random() * 12) + 2,
-          ms: Math.floor(Math.random() * 120) + 20,
-        }, ...l].slice(0, 40));
+    const iv = setInterval(() => {
+      if (done) { clearInterval(iv); return; }
+      setElapsedMs(performance.now() - startRef.current);
+    }, 250);
+    return () => clearInterval(iv);
+  }, [done]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let cancelled = false;
+    startRef.current = performance.now();
+    const stamp = () => ((performance.now() - startRef.current) / 1000).toFixed(2);
+
+    const handleEvent = (ev) => {
+      if (cancelled) return;
+      switch (ev.phase) {
+        case 'scan':
+          setPhaseIdx(i => Math.max(i, 1));
+          setTotalFiles(Math.max(1, ev.total_files | 0));
+          break;
+        case 'parse': {
+          setPhaseIdx(i => Math.max(i, 2));
+          if (typeof ev.files_done === 'number') setFilesProcessed(ev.files_done);
+          if (typeof ev.chunks === 'number') setChunks(c => c + ev.chunks);
+          const displayFile = typeof ev.file === 'string'
+            ? ev.file.split(/[\\/]/).slice(-2).join('/')
+            : '(unknown)';
+          setLog(l => [{
+            t: stamp(), file: displayFile, chunks: ev.chunks | 0, ms: ev.ms | 0,
+          }, ...l].slice(0, 40));
+          break;
+        }
+        case 'embed':
+          setPhaseIdx(i => Math.max(i, 3));
+          break;
+        case 'store':
+          setPhaseIdx(4);
+          break;
+        case 'done':
+          setPhaseIdx(4);
+          if (typeof ev.files === 'number') setFilesProcessed(ev.files);
+          if (typeof ev.chunks === 'number') setChunks(ev.chunks);
+          setDone(true);
+          break;
+        case 'error':
+          setError(ev.message || 'ingest failed');
+          setDone(true);
+          break;
       }
-      if (step >= 110) {
-        clearInterval(t);
-        setFilesProcessed(targetFiles);
-        setPhaseIdx(4);
+    };
+
+    const run = async () => {
+      if (selectedFolders.length === 0) {
+        setError('No folders selected. Go back to step 03 and pick at least one.');
+        setDone(true);
+        return;
+      }
+      try {
+        const r = await fetch('/api/setup/ingest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            folders: selectedFolders.map(f => f.path),
+            extensions: enabledExtensions,
+          }),
+          signal: controller.signal,
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${r.status}`);
+        }
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done: streamDone, value } = await reader.read();
+          if (streamDone) break;
+          if (cancelled) return;
+          buffer += decoder.decode(value, { stream: true });
+          let nl;
+          while ((nl = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, nl).trim();
+            buffer = buffer.slice(nl + 1);
+            if (!line) continue;
+            try { handleEvent(JSON.parse(line)); } catch { /* skip malformed */ }
+          }
+        }
+        if (!cancelled) {
+          // Server closed the stream without a `done` event — assume success.
+          setDone(d => d || true);
+        }
+      } catch (e) {
+        if (cancelled || e?.name === 'AbortError') return;
+        setError(String(e.message || e));
         setDone(true);
       }
-    }, 60);
-    return () => clearInterval(t);
+    };
+
+    run();
+    return () => { cancelled = true; controller.abort(); };
   }, []);
 
-  const pct = (filesProcessed / targetFiles) * 100;
+  const pct = totalFiles > 0 ? Math.min(100, (filesProcessed / totalFiles) * 100) : (done ? 100 : 0);
+  const displayPct = done && !error ? 100 : pct;
   const SZ = 180;
   const R = (SZ - 16) / 2;
   const C = 2 * Math.PI * R;
@@ -62,11 +140,11 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
             <svg width={SZ} height={SZ} style={{ transform: 'rotate(-90deg)' }}>
               <circle cx={SZ/2} cy={SZ/2} r={R} stroke="var(--border)" strokeWidth={4} fill="none" />
               <circle cx={SZ/2} cy={SZ/2} r={R}
-                stroke="var(--accent)" strokeWidth={4} fill="none"
+                stroke={error ? 'var(--warn, #c97d17)' : 'var(--accent)'} strokeWidth={4} fill="none"
                 strokeLinecap="square"
                 strokeDasharray={C}
-                strokeDashoffset={C - (C * pct) / 100}
-                style={{ transition: 'stroke-dashoffset 0.2s' }}
+                strokeDashoffset={C - (C * displayPct) / 100}
+                style={{ transition: 'stroke-dashoffset 0.25s' }}
               />
             </svg>
             <div style={{
@@ -74,10 +152,10 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
               alignItems: 'center', justifyContent: 'center',
             }}>
               <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
-                {pct.toFixed(0)}<span style={{ fontSize: 16, color: 'var(--text-dim)' }}>%</span>
+                {displayPct.toFixed(0)}<span style={{ fontSize: 16, color: 'var(--text-dim)' }}>%</span>
               </div>
               <div style={{ fontSize: 10, letterSpacing: '0.14em', color: 'var(--text-dimmer)', textTransform: 'uppercase' }}>
-                {phases[phaseIdx]}ing
+                {done && !error ? 'done' : `${phases[phaseIdx]}ing`}
               </div>
             </div>
           </div>
@@ -85,10 +163,10 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--border)', border: '1px solid var(--border)', marginBottom: 18 }}>
               {[
-                ['files', `${filesProcessed.toLocaleString()} / ${targetFiles.toLocaleString()}`],
+                ['files', `${filesProcessed.toLocaleString()} / ${totalFiles.toLocaleString()}`],
                 ['chunks', chunks.toLocaleString()],
-                ['elapsed', `${(filesProcessed * 0.04).toFixed(1)}s`],
-                ['eta', done ? '—' : `${Math.max(0, Math.round((targetFiles - filesProcessed) * 0.04))}s`],
+                ['elapsed', `${(elapsedMs / 1000).toFixed(1)}s`],
+                ['phase', phases[phaseIdx]],
               ].map(([l, v]) => (
                 <div key={l} style={{ background: 'var(--bg)', padding: 12 }}>
                   <div style={{ fontSize: 9, color: 'var(--text-dimmer)', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 4 }}>{l}</div>
@@ -123,7 +201,16 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           </div>
         </div>
 
-        <StepNav onBack={onBack} onNext={onNext} nextLabel={done ? 'run a test query' : 'indexing…'} nextDisabled={!done} />
+        {error && (
+          <div style={{ marginBottom: 14, padding: 14, border: '1px solid var(--warn, #c97d17)', background: 'rgba(201,125,23,0.08)' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--warn, #c97d17)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>ingest failed</div>
+            <div style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'var(--mono)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{error}</div>
+          </div>
+        )}
+
+        <StepNav onBack={onBack} onNext={onNext}
+          nextLabel={error ? 'fix and retry' : done ? 'run a test query' : 'indexing…'}
+          nextDisabled={!done || !!error} />
       </div>
 
       <div style={{ flex: '1 1 45%', borderLeft: '1px solid var(--border)', background: 'var(--bg-alt)', display: 'flex', flexDirection: 'column' }}>
@@ -133,6 +220,11 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           <span style={{ width: 60, textAlign: 'right' }}>ms</span>
         </ColHeader>
         <div style={{ flex: 1, overflow: 'auto' }}>
+          {log.length === 0 && !done && (
+            <div style={{ padding: '14px 18px', fontSize: 11, color: 'var(--text-dimmer)' }}>
+              waiting for parse events…
+            </div>
+          )}
           {log.map((l, i) => (
             <Row key={i} accent="var(--accent)" style={{ animation: 'slideIn 0.2s' }}>
               <span style={{ fontSize: 10, color: 'var(--text-faintest)', width: 36, fontVariantNumeric: 'tabular-nums' }}>{l.t}</span>
