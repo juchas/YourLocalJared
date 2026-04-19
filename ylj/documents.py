@@ -129,7 +129,11 @@ def load_documents(directory: Path) -> list[Chunk]:
     """Load and chunk all supported documents from a directory."""
     all_chunks = []
     for path in sorted(directory.rglob("*")):
-        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS and not _should_skip(path):
+        if (
+            path.is_file()
+            and path.suffix.lower() in SUPPORTED_EXTENSIONS
+            and not _should_skip(path)
+        ):
             print(f"Processing: {path}")
             raw = parse_document(path)
             chunked = split_chunks(raw)

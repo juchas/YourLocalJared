@@ -4,7 +4,6 @@ Open WebUI connects to this as if it were an OpenAI API.
 Includes an onboarding wizard at /setup for first-time configuration.
 """
 
-import os
 import subprocess
 import threading
 import time
@@ -20,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ylj.config import LLM_MODEL, SERVER_HOST, SERVER_PORT
+from ylj.probe import probe as probe_hardware
 from ylj.rag import query
 
 app = FastAPI(title="YourLocalJared RAG API")
@@ -63,6 +63,12 @@ def system_info():
     return {"ram_gb": ram_gb, "device": device}
 
 
+@app.get("/api/setup/probe")
+def probe():
+    """Detailed hardware probe for the onboarding wizard."""
+    return probe_hardware()
+
+
 class SetupConfig(BaseModel):
     llm_model: str
     embedding_model: str
@@ -96,15 +102,22 @@ def apply_setup(config: SetupConfig):
             python_cmd = str(venv_python) if venv_python.exists() else "python"
 
             # Download embedding model
-            _setup_status["message"] = f"Downloading embedding model ({config.embedding_model})..."
+            _setup_status["message"] = (
+                f"Downloading embedding model ({config.embedding_model})..."
+            )
+            download_snippet = (
+                "from sentence_transformers import SentenceTransformer; "
+                f"SentenceTransformer('{config.embedding_model}')"
+            )
             subprocess.run(
-                [python_cmd, "-c",
-                 f"from sentence_transformers import SentenceTransformer; SentenceTransformer('{config.embedding_model}')"],
+                [python_cmd, "-c", download_snippet],
                 check=True, capture_output=True,
             )
 
             # Download LLM
-            _setup_status["message"] = f"Downloading LLM ({config.llm_model})... This may take a while."
+            _setup_status["message"] = (
+                f"Downloading LLM ({config.llm_model})... This may take a while."
+            )
             subprocess.run(
                 ["hf", "download", config.llm_model],
                 check=True, capture_output=True,
