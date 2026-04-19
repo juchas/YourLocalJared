@@ -4,6 +4,7 @@ Open WebUI connects to this as if it were an OpenAI API.
 Includes an onboarding wizard at /setup for first-time configuration.
 """
 
+import json
 import subprocess
 import threading
 import time
@@ -114,7 +115,7 @@ def apply_setup(config: SetupConfig):
             )
             download_snippet = (
                 "from sentence_transformers import SentenceTransformer; "
-                f"SentenceTransformer('{config.embedding_model}')"
+                f"SentenceTransformer({json.dumps(config.embedding_model)})"
             )
             subprocess.run(
                 [python_cmd, "-c", download_snippet],

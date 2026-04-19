@@ -12,12 +12,21 @@ from ylj import llm
 
 
 class _StubResponse:
-    def __init__(self, status_code: int, payload: dict | None = None, text: str = ""):
+    def __init__(
+        self,
+        status_code: int,
+        payload: dict | None = None,
+        text: str = "",
+        json_error: Exception | None = None,
+    ):
         self.status_code = status_code
         self._payload = payload or {}
         self.text = text
+        self._json_error = json_error
 
     def json(self):
+        if self._json_error is not None:
+            raise self._json_error
         return self._payload
 
 
@@ -72,4 +81,24 @@ def test_generate_surfaces_model_missing(monkeypatch):
     monkeypatch.setattr(llm.httpx, "Client", lambda **kw: _StubClient(handler))
 
     with pytest.raises(RuntimeError, match="not pulled"):
+        llm.generate("q", [{"source": "a.md", "text": "x"}])
+
+
+def test_generate_surfaces_invalid_json(monkeypatch):
+    def handler(url, json):
+        return _StubResponse(200, text="<html>bad</html>", json_error=ValueError("bad"))
+
+    monkeypatch.setattr(llm.httpx, "Client", lambda **kw: _StubClient(handler))
+
+    with pytest.raises(RuntimeError, match="invalid JSON"):
+        llm.generate("q", [{"source": "a.md", "text": "x"}])
+
+
+def test_generate_surfaces_missing_content(monkeypatch):
+    def handler(url, json):
+        return _StubResponse(200, {"message": {}})
+
+    monkeypatch.setattr(llm.httpx, "Client", lambda **kw: _StubClient(handler))
+
+    with pytest.raises(RuntimeError, match="missing 'message.content'"):
         llm.generate("q", [{"source": "a.md", "text": "x"}])

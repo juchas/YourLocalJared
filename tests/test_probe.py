@@ -1,6 +1,6 @@
 """Smoke tests for the hardware probe endpoint."""
 
-from ylj.probe import probe
+from ylj.probe import probe, recommend_model
 
 
 def test_probe_shape():
@@ -35,3 +35,10 @@ def test_probe_shape():
 
     assert result["os"]["system"]
     assert result["os"]["machine"]
+
+
+def test_recommend_model_uses_ui_breakpoints():
+    assert recommend_model(11.9, False) == "phi3.5:mini"  # limited
+    assert recommend_model(12.0, False) == "qwen2.5:7b"  # modest
+    assert recommend_model(24.0, False) == "qwen2.5:7b"  # capable
+    assert recommend_model(48.0, True) == "qwen2.5:7b"  # high

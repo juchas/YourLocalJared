@@ -61,7 +61,7 @@ def detect_gpu() -> tuple[dict, bool, bool]:
 
 
 def recommend_model(ram_total_gb: float, has_accelerator: bool) -> str:
-    """Pick a sensible default LLM from the hardware tier.
+    """Pick a sensible default LLM from available RAM and acceleration.
 
     Mirrors the tier buckets rendered in screens-hardware.jsx. The UI's
     "modest" tier (12-24 GB) still shows a 7B chip as ok, so we pick
