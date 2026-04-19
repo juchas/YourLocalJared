@@ -93,6 +93,8 @@ def generate(question: str, context_chunks: list[dict]) -> str:
         raise RuntimeError("Ollama response missing 'message.content' string.")
 
     return content.strip()
+
+
 def status() -> dict:
     """Check Ollama daemon reachability and list pulled models.
 

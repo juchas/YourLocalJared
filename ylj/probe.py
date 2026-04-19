@@ -63,12 +63,13 @@ def detect_gpu() -> tuple[dict, bool, bool]:
 def recommend_model(ram_total_gb: float, has_accelerator: bool) -> str:
     """Pick a sensible default LLM from the hardware tier.
 
-    Mirrors the tier buckets rendered in screens-hardware.jsx so the
-    backend default and the UI's suggested chip can't disagree.
+    Mirrors the tier buckets rendered in screens-hardware.jsx. The UI's
+    "modest" tier (12-24 GB) still shows a 7B chip as ok, so we pick
+    qwen2.5:7b everywhere above the "limited" threshold. `has_accelerator`
+    is unused at this coarse level but kept for future tier refinement.
     """
+    del has_accelerator
     if ram_total_gb < 12:
-        return "phi3.5:mini"
-    if ram_total_gb < 24 and not has_accelerator:
         return "phi3.5:mini"
     return "qwen2.5:7b"
 

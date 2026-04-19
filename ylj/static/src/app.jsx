@@ -20,11 +20,20 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const fallback = { running: false, version: null, models: [] };
+    const normalize = (d) => ({
+      running: !!(d && d.running),
+      version: d && typeof d.version === 'string' ? d.version : null,
+      models: d && Array.isArray(d.models) ? d.models : [],
+    });
     const check = () => {
       fetch('/api/setup/ollama-status')
-        .then((r) => r.json())
-        .then((d) => { if (!cancelled) setOllama(d); })
-        .catch(() => { if (!cancelled) setOllama({ running: false, version: null, models: [] }); });
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+        .then((d) => { if (!cancelled) setOllama(normalize(d)); })
+        .catch(() => { if (!cancelled) setOllama(fallback); });
     };
     check();
     const iv = setInterval(check, 10000);
