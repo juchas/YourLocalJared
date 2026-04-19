@@ -1,8 +1,11 @@
-function ScreenFileTypes({ onNext, onBack, fileTypes, setFileTypes }) {
-  const total = fileTypes.filter(t => t.on).reduce((a, b) => a + b.count, 0);
-  const totalAll = fileTypes.reduce((a, b) => a + b.count, 0);
+function ScreenFileTypes({ onNext, onBack, fileTypes, setFileTypes, folders }) {
+  // Derive live counts from the folder scans. `fileTypes` state still holds
+  // the `on` toggle per category; counts get recomputed on every render.
+  const derived = computeFileTypeCounts(folders || [], fileTypes);
+  const total = derived.filter(t => t.on).reduce((a, b) => a + b.count, 0);
+  const totalAll = derived.reduce((a, b) => a + b.count, 0) || 1;
   const toggle = (id) => setFileTypes(ts => ts.map(t => t.id === id ? { ...t, on: !t.on } : t));
-  const selectedIds = fileTypes.filter(t => t.on).map(t => t.id);
+  const selectedIds = derived.filter(t => t.on).map(t => t.id);
 
   return (
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -24,7 +27,7 @@ function ScreenFileTypes({ onNext, onBack, fileTypes, setFileTypes }) {
             <span style={{ width: 100 }}>size relative</span>
             <span style={{ width: 80, textAlign: 'right' }}>files</span>
           </ColHeader>
-          {fileTypes.map(t => {
+          {derived.map(t => {
             const pct = (t.count / totalAll) * 100;
             return (
               <Row key={t.id} selected={t.on} accent={t.on ? 'var(--accent)' : 'var(--border-hi)'} onClick={() => toggle(t.id)}>
@@ -54,17 +57,17 @@ function ScreenFileTypes({ onNext, onBack, fileTypes, setFileTypes }) {
         <div>
           <div style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-dimmer)', marginBottom: 10 }}>composition</div>
           <div style={{ display: 'flex', height: 24, border: '1px solid var(--border)', overflow: 'hidden' }}>
-            {fileTypes.filter(t => t.on).map((t, i) => (
+            {derived.filter(t => t.on).map((t, i) => (
               <div key={t.id} title={`${t.label} — ${t.count}`}
                 style={{
                   flex: t.count,
                   background: ['var(--accent)', '#11a851', '#0d8441', '#5fdc93', '#2fc773', '#86e7ad'][i % 6],
-                  borderRight: i < fileTypes.filter(x=>x.on).length - 1 ? '1px solid var(--bg)' : 'none',
+                  borderRight: i < derived.filter(x=>x.on).length - 1 ? '1px solid var(--bg)' : 'none',
                 }} />
             ))}
           </div>
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {fileTypes.filter(t => t.on).map((t, i) => (
+            {derived.filter(t => t.on).map((t, i) => (
               <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
                 <span style={{ width: 9, height: 9, background: ['var(--accent)', '#11a851', '#0d8441', '#5fdc93', '#2fc773', '#86e7ad'][i % 6] }} />
                 <span style={{ flex: 1, color: 'var(--text)' }}>{t.label}</span>

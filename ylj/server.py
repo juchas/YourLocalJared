@@ -4,7 +4,6 @@ Open WebUI connects to this as if it were an OpenAI API.
 Includes an onboarding wizard at /setup for first-time configuration.
 """
 
-import os
 import subprocess
 import threading
 import time
@@ -14,11 +13,12 @@ from pathlib import Path
 import psutil
 import torch
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from ylj import scanner
 from ylj.config import LLM_MODEL, SERVER_HOST, SERVER_PORT
 from ylj.rag import query
 
@@ -63,6 +63,26 @@ def system_info():
     return {"ram_gb": ram_gb, "device": device}
 
 
+@app.get("/api/setup/folders")
+def folders_endpoint():
+    """Return suggested home-dir folders (scanned) + default ignore patterns."""
+    return scanner.list_folders()
+
+
+class ScanFolderRequest(BaseModel):
+    path: str
+
+
+@app.post("/api/setup/scan-folder")
+def scan_folder_endpoint(body: ScanFolderRequest):
+    """Scan a user-provided path (must resolve under $HOME)."""
+    try:
+        safe = scanner.safe_home_path(body.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return scanner.scan_folder(safe)
+
+
 class SetupConfig(BaseModel):
     llm_model: str
     embedding_model: str
@@ -95,16 +115,25 @@ def apply_setup(config: SetupConfig):
             venv_python = project_root / ".venv" / "bin" / "python"
             python_cmd = str(venv_python) if venv_python.exists() else "python"
 
-            # Download embedding model
-            _setup_status["message"] = f"Downloading embedding model ({config.embedding_model})..."
+            # Download embedding model. Pass the ID as argv so a crafted
+            # value can't break out of the `python -c` string — the endpoint
+            # is unauth'd and the server binds 0.0.0.0 by default.
+            _setup_status["message"] = (
+                f"Downloading embedding model ({config.embedding_model})..."
+            )
+            download_snippet = (
+                "import sys; from sentence_transformers import SentenceTransformer; "
+                "SentenceTransformer(sys.argv[1])"
+            )
             subprocess.run(
-                [python_cmd, "-c",
-                 f"from sentence_transformers import SentenceTransformer; SentenceTransformer('{config.embedding_model}')"],
+                [python_cmd, "-c", download_snippet, config.embedding_model],
                 check=True, capture_output=True,
             )
 
             # Download LLM
-            _setup_status["message"] = f"Downloading LLM ({config.llm_model})... This may take a while."
+            _setup_status["message"] = (
+                f"Downloading LLM ({config.llm_model})... This may take a while."
+            )
             subprocess.run(
                 ["hf", "download", config.llm_model],
                 check=True, capture_output=True,

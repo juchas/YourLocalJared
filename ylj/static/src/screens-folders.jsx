@@ -1,6 +1,17 @@
 function ScreenFolders({ onNext, onBack, folders, setFolders, ignores, setIgnores }) {
-  const [selectedId, setSelectedId] = useState(folders.find(f => f.selected)?.id || folders[0].id);
+  const [selectedId, setSelectedId] = useState(
+    folders.find(f => f.selected)?.id || folders[0]?.id || null,
+  );
   const [addValue, setAddValue] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState(null);
+
+  // Keep the selection valid when folders load/change.
+  useEffect(() => {
+    if (selectedId && folders.some(f => f.id === selectedId)) return;
+    const next = folders.find(f => f.selected) || folders[0];
+    setSelectedId(next ? next.id : null);
+  }, [folders, selectedId]);
 
   const total = folders.filter(f => f.selected);
   const totalFiles = total.reduce((a, b) => a + b.files, 0);
@@ -13,12 +24,36 @@ function ScreenFolders({ onNext, onBack, folders, setFolders, ignores, setIgnore
   const remove = (id) => {
     setFolders(fs => fs.filter(f => f.id !== id));
   };
-  const add = () => {
-    if (!addValue.trim()) return;
-    const id = 'x' + Date.now();
-    setFolders(fs => [...fs, { id, path: addValue.trim(), files: Math.floor(Math.random()*500+50), sizeGB: +(Math.random()*2).toFixed(1), selected: true, warn: null }]);
-    setAddValue('');
-    setSelectedId(id);
+  const add = async () => {
+    const raw = addValue.trim();
+    if (!raw || adding) return;
+    setAdding(true);
+    setAddError(null);
+    try {
+      const r = await fetch('/api/setup/scan-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: raw }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${r.status}`);
+      }
+      const folder = await r.json();
+      // If a scan already exists for this path, treat the add as a re-scan.
+      setFolders(fs => {
+        const idx = fs.findIndex(f => f.id === folder.id);
+        return idx >= 0
+          ? fs.map((f, i) => i === idx ? { ...folder, selected: true } : f)
+          : [...fs, folder];
+      });
+      setSelectedId(folder.id);
+      setAddValue('');
+    } catch (e) {
+      setAddError(String(e.message || e));
+    } finally {
+      setAdding(false);
+    }
   };
 
   return (
@@ -62,17 +97,27 @@ function ScreenFolders({ onNext, onBack, folders, setFolders, ignores, setIgnore
                 </Row>
               ))}
             </div>
-            <div style={{ borderTop: '1px solid var(--border)', padding: 12, display: 'flex', gap: 8, background: 'var(--bg-alt)' }}>
-              <input type="text" placeholder="add path — ~/Folder/Name"
-                value={addValue}
-                onChange={e => setAddValue(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && add()}
-                style={{
-                  flex: 1, background: 'var(--bg)', border: '1px solid var(--border)',
-                  padding: '8px 10px', fontSize: 11, fontFamily: 'var(--mono)', borderRadius: 2,
-                }}
-              />
-              <GhostButton iconLeft="plus" onClick={add}>add</GhostButton>
+            <div style={{ borderTop: '1px solid var(--border)', padding: 12, background: 'var(--bg-alt)' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input type="text" placeholder="add path — ~/Folder/Name"
+                  value={addValue}
+                  onChange={e => { setAddValue(e.target.value); setAddError(null); }}
+                  onKeyDown={e => e.key === 'Enter' && add()}
+                  disabled={adding}
+                  style={{
+                    flex: 1, background: 'var(--bg)', border: '1px solid var(--border)',
+                    padding: '8px 10px', fontSize: 11, fontFamily: 'var(--mono)', borderRadius: 2,
+                  }}
+                />
+                <GhostButton iconLeft={adding ? 'clock' : 'plus'} onClick={add}>
+                  {adding ? 'scanning…' : 'add'}
+                </GhostButton>
+              </div>
+              {addError && (
+                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--warn, #c97d17)' }}>
+                  {addError}
+                </div>
+              )}
             </div>
           </div>
 

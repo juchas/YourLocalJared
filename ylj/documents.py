@@ -3,8 +3,6 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 from ylj.config import CHUNK_OVERLAP, CHUNK_SIZE
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md", ".csv"}
@@ -108,6 +106,8 @@ def parse_document(path: Path) -> list[Chunk]:
 
 def split_chunks(chunks: list[Chunk]) -> list[Chunk]:
     """Split raw chunks into smaller pieces for embedding."""
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
@@ -129,7 +129,11 @@ def load_documents(directory: Path) -> list[Chunk]:
     """Load and chunk all supported documents from a directory."""
     all_chunks = []
     for path in sorted(directory.rglob("*")):
-        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS and not _should_skip(path):
+        if (
+            path.is_file()
+            and path.suffix.lower() in SUPPORTED_EXTENSIONS
+            and not _should_skip(path)
+        ):
             print(f"Processing: {path}")
             raw = parse_document(path)
             chunked = split_chunks(raw)

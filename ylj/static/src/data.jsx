@@ -23,16 +23,35 @@ const FOLDERS = [
 
 const IGNORES = ['node_modules', '.git', '.venv', '__pycache__', '*.log', 'dist', 'build', '.DS_Store'];
 
+// Each category owns a set of extensions (lowercased, with leading dot).
+// `count` is computed live from folder.extensions at render time, so the
+// hardcoded numbers here are only used as a fallback before the first
+// folder scan completes.
 const FILETYPES = [
-  { id: 'md',   ext: '.md, .markdown, .mdx', label: 'markdown',       count: 1342, on: true },
-  { id: 'txt',  ext: '.txt',                  label: 'plain text',     count: 412,  on: true },
-  { id: 'pdf',  ext: '.pdf',                  label: 'pdf',            count: 284,  on: true },
-  { id: 'docx', ext: '.docx, .doc',           label: 'word',           count: 98,   on: true },
-  { id: 'code', ext: '.py, .js, .ts, .go…',   label: 'source code',    count: 1104, on: false },
-  { id: 'html', ext: '.html, .htm',           label: 'html',           count: 62,   on: false },
-  { id: 'csv',  ext: '.csv, .tsv',            label: 'tabular',        count: 28,   on: false },
-  { id: 'epub', ext: '.epub',                 label: 'ebooks',         count: 14,   on: false },
+  { id: 'md',   ext: '.md, .markdown, .mdx',                      label: 'markdown',    count: 0, on: true,  extensions: ['.md', '.markdown', '.mdx'] },
+  { id: 'txt',  ext: '.txt',                                      label: 'plain text',  count: 0, on: true,  extensions: ['.txt'] },
+  { id: 'pdf',  ext: '.pdf',                                      label: 'pdf',         count: 0, on: true,  extensions: ['.pdf'] },
+  { id: 'docx', ext: '.docx, .doc',                               label: 'word',        count: 0, on: true,  extensions: ['.docx', '.doc'] },
+  { id: 'code', ext: '.py, .js, .ts, .go, .rs, .java, .rb',       label: 'source code', count: 0, on: false, extensions: ['.py', '.js', '.ts', '.tsx', '.jsx', '.go', '.rs', '.java', '.rb', '.c', '.cpp', '.h'] },
+  { id: 'html', ext: '.html, .htm',                               label: 'html',        count: 0, on: false, extensions: ['.html', '.htm'] },
+  { id: 'csv',  ext: '.csv, .tsv',                                label: 'tabular',     count: 0, on: false, extensions: ['.csv', '.tsv', '.xlsx'] },
+  { id: 'epub', ext: '.epub',                                     label: 'ebooks',      count: 0, on: false, extensions: ['.epub'] },
 ];
+
+function computeFileTypeCounts(folders, fileTypes) {
+  // Sum folder.extensions across selected folders into each category's count.
+  const totals = {};
+  for (const f of folders || []) {
+    if (!f.selected) continue;
+    for (const [ext, n] of Object.entries(f.extensions || {})) {
+      totals[ext] = (totals[ext] || 0) + n;
+    }
+  }
+  return fileTypes.map(t => ({
+    ...t,
+    count: t.extensions.reduce((acc, e) => acc + (totals[e] || 0), 0),
+  }));
+}
 
 const LLMS = [
   { id: 'llama3.1:8b',    name: 'Llama 3.1',         size: '8B',  sizeGB: 4.7, ram: 8,  gated: true,  desc: 'meta · general, multilingual', rec: false },
@@ -50,4 +69,4 @@ const EMBEDDERS = [
   { id: 'all-minilm',      name: 'all-MiniLM-L6',     dims: 384,  sizeGB: 0.09, desc: 'sbert · classic, tiny',     rec: false },
 ];
 
-Object.assign(window, { HARDWARE, FOLDERS, IGNORES, FILETYPES, LLMS, EMBEDDERS });
+Object.assign(window, { HARDWARE, FOLDERS, IGNORES, FILETYPES, LLMS, EMBEDDERS, computeFileTypeCounts });
