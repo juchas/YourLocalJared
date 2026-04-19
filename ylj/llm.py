@@ -72,5 +72,8 @@ def generate(question: str, context_chunks: list[dict]) -> str:
             pad_token_id=tokenizer.eos_token_id,
         )
 
-    response = tokenizer.decode(outputs[0][inputs["input_ids"].shape[-1] :], skip_special_tokens=True)
+    response = tokenizer.decode(
+        outputs[0][inputs["input_ids"].shape[-1] :],
+        skip_special_tokens=True,
+    )
     return response.strip()
