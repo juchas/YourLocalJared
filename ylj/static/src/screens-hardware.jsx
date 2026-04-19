@@ -70,7 +70,13 @@ function ScreenHardware({ onNext, onBack }) {
 
   const tier = (() => {
     if (!data) return { label: 'probing', chip7: null, chip13: null, chip30: null, chip70: null, msg: '' };
-    const gb = data.ram.total_gb;
+    const totalGb = Number(data.ram.total_gb);
+    const availableGb = Number(data.ram.available_gb);
+    // Budget against what's actually free so we don't suggest models that
+    // will OOM under real memory pressure.
+    const gb = Number.isFinite(totalGb)
+      ? (Number.isFinite(availableGb) ? Math.min(totalGb, availableGb) : totalGb)
+      : availableGb;
     const accel = data.cuda_available || data.mps_available;
     if (gb >= 48 && accel) return { label: 'high', chip7: true, chip13: true, chip30: true, chip70: 'slow', msg: 'you can run 7B–30B comfortably; 70B usable but slow.' };
     if (gb >= 24) return { label: 'capable', chip7: true, chip13: true, chip30: 'slow', chip70: false, msg: 'you can run 7B–13B comfortably. 30B possible but slow.' };
@@ -94,12 +100,12 @@ function ScreenHardware({ onNext, onBack }) {
     { icon: 'code',   label: 'python',   value: data.python.version,                      meta: 'interpreter ready',                                              tone: 'ok' },
     { icon: 'zap',    label: 'os',       value: data.os.pretty,                           meta: data.os.machine,                                                  tone: 'ok' },
   ] : [
-    { icon: 'cpu',    label: 'chip',     value: '…', meta: 'probing', tone: 'ok' },
-    { icon: 'memory', label: 'memory',   value: '…', meta: 'probing', tone: 'ok' },
-    { icon: 'zap',    label: 'gpu',      value: '…', meta: 'probing', tone: 'ok' },
-    { icon: 'hdd',    label: 'storage',  value: '…', meta: 'probing', tone: 'ok' },
-    { icon: 'code',   label: 'python',   value: '…', meta: 'probing', tone: 'ok' },
-    { icon: 'zap',    label: 'os',       value: '…', meta: 'probing', tone: 'ok' },
+    { icon: 'cpu',    label: 'chip',     value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'memory', label: 'memory',   value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'zap',    label: 'gpu',      value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'hdd',    label: 'storage',  value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'code',   label: 'python',   value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
+    { icon: 'zap',    label: 'os',       value: '…', meta: error ? 'probe failed' : 'probing', tone: 'ok' },
   ];
 
   const reprobe = () => setNonce((n) => n + 1);
@@ -128,20 +134,20 @@ function ScreenHardware({ onNext, onBack }) {
           {rows.map((r, i) => {
             const probed = data && progress > i;
             return (
-              <Row key={r.label} accent={probed ? 'var(--accent)' : 'var(--border-hi)'}>
-                <Icon name={r.icon} size={14} style={{ color: probed ? 'var(--accent-hi)' : 'var(--text-dimmer)' }} />
+              <Row key={r.label} accent={probed ? 'var(--accent)' : error ? 'var(--warn)' : 'var(--border-hi)'}>
+                <Icon name={r.icon} size={14} style={{ color: probed ? 'var(--accent-hi)' : error ? 'var(--warn)' : 'var(--text-dimmer)' }} />
                 <span style={{ width: 90, fontSize: 10, color: 'var(--text-dimmer)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                   {r.label}
                 </span>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                   <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {probed ? r.value : '…'}
+                    {probed ? r.value : error ? '—' : '…'}
                   </span>
                   <span style={{ fontSize: 10, color: 'var(--text-dimmer)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {probed ? r.meta : 'probing'}
+                    {probed ? r.meta : error ? 'probe failed' : 'probing'}
                   </span>
                 </div>
-                {probed ? <Chip tone={r.tone}>{r.tone === 'warn' ? 'check' : 'ok'}</Chip> : <span style={{
+                {probed ? <Chip tone={r.tone}>{r.tone === 'warn' ? 'check' : 'ok'}</Chip> : error ? <Chip tone="warn">failed</Chip> : <span style={{
                   width: 10, height: 10, borderRadius: '50%',
                   background: 'var(--border)',
                   animation: 'pulse 1s ease-in-out infinite',

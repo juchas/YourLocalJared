@@ -101,16 +101,18 @@ def apply_setup(config: SetupConfig):
             venv_python = project_root / ".venv" / "bin" / "python"
             python_cmd = str(venv_python) if venv_python.exists() else "python"
 
-            # Download embedding model
+            # Download embedding model. Pass the ID as argv so a crafted
+            # value can't break out of the `python -c` string — the endpoint
+            # is unauth'd and the server binds 0.0.0.0 by default.
             _setup_status["message"] = (
                 f"Downloading embedding model ({config.embedding_model})..."
             )
             download_snippet = (
-                "from sentence_transformers import SentenceTransformer; "
-                f"SentenceTransformer('{config.embedding_model}')"
+                "import sys; from sentence_transformers import SentenceTransformer; "
+                "SentenceTransformer(sys.argv[1])"
             )
             subprocess.run(
-                [python_cmd, "-c", download_snippet],
+                [python_cmd, "-c", download_snippet, config.embedding_model],
                 check=True, capture_output=True,
             )
 
