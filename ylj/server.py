@@ -15,6 +15,20 @@ import threading
 from ipaddress import ip_address
 from pathlib import Path
 
+import psutil
+import torch
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from ylj import scanner
+from ylj.config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, LLM_MODEL, SERVER_HOST, SERVER_PORT
+from ylj.llm import status as ollama_status_check
+from ylj.probe import probe as probe_hardware
+from ylj.rag import query
+
 
 def _resolve_ollama() -> str:
     """Find ollama.exe even if PATH hasn't been refreshed post-install."""
@@ -29,20 +43,6 @@ def _resolve_ollama() -> str:
             if candidate.exists():
                 return str(candidate)
     return "ollama"  # let subprocess raise FileNotFoundError with the bare name
-
-import psutil
-import torch
-import uvicorn
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-
-from ylj import scanner
-from ylj.config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, LLM_MODEL, SERVER_HOST, SERVER_PORT
-from ylj.llm import status as ollama_status_check
-from ylj.probe import probe as probe_hardware
-from ylj.rag import query
 
 app = FastAPI(title="YourLocalJared RAG API")
 
@@ -198,7 +198,8 @@ def apply_setup(config: SetupConfig):
             hf_cache = Path.home() / ".cache" / "huggingface" / "hub" / hf_slug
             if hf_cache.exists():
                 _setup_status["message"] = (
-                    f"Embedding model ({config.embedding_model}) already cached — skipping download."
+                    f"Embedding model ({config.embedding_model}) already cached "
+                    "— skipping download."
                 )
             else:
                 # Pass the ID as argv so a crafted value can't break out
