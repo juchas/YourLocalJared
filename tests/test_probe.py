@@ -1,6 +1,6 @@
 """Smoke tests for the hardware probe endpoint."""
 
-from ylj.probe import probe
+from ylj.probe import probe, recommend_model
 
 
 def test_probe_shape():
@@ -8,8 +8,10 @@ def test_probe_shape():
 
     assert set(result.keys()) >= {
         "os", "chip", "cpu", "python", "ram", "disk", "gpu",
-        "cuda_available", "mps_available",
+        "cuda_available", "mps_available", "recommended_model",
     }
+
+    assert result["recommended_model"] in {"phi3.5:mini", "qwen2.5:7b"}
 
     assert isinstance(result["chip"], str) and result["chip"]
 
@@ -33,3 +35,10 @@ def test_probe_shape():
 
     assert result["os"]["system"]
     assert result["os"]["machine"]
+
+
+def test_recommend_model_uses_ui_breakpoints():
+    assert recommend_model(11.9) == "phi3.5:mini"  # limited
+    assert recommend_model(12.0) == "qwen2.5:7b"  # modest
+    assert recommend_model(24.0) == "qwen2.5:7b"  # capable
+    assert recommend_model(48.0) == "qwen2.5:7b"  # high

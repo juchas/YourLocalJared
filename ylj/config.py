@@ -20,8 +20,9 @@ COLLECTION_NAME = os.getenv("YLJ_COLLECTION_NAME", "documents")
 EMBEDDING_MODEL = os.getenv("YLJ_EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 EMBEDDING_DIMENSION = int(os.getenv("YLJ_EMBEDDING_DIMENSION", "384"))
 
-# LLM
-LLM_MODEL = os.getenv("YLJ_LLM_MODEL", "mistralai/Mistral-7B-Instruct-v0.3")
+# LLM (via Ollama)
+OLLAMA_HOST = os.getenv("YLJ_OLLAMA_HOST", "http://localhost:11434")
+LLM_MODEL = os.getenv("YLJ_LLM_MODEL", "qwen2.5:7b")
 LLM_MAX_NEW_TOKENS = int(os.getenv("YLJ_LLM_MAX_NEW_TOKENS", "512"))
 LLM_TEMPERATURE = float(os.getenv("YLJ_LLM_TEMPERATURE", "0.7"))
 

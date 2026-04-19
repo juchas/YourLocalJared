@@ -18,10 +18,14 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install test deps
+      - name: Install project
         run: |
           python -m pip install --upgrade pip
+          # Install CPU torch first so pyproject's torch requirement is
+          # satisfied without pulling the huge GPU wheels from PyPI.
           pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # Editable install of the full project so CI catches any drift
+          # in pyproject.toml (missing runtime deps, etc.).
           pip install -e ".[dev]"
 
       - name: Ruff

@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ylj.config import LLM_MODEL, SERVER_HOST, SERVER_PORT
+from ylj.llm import status as ollama_status_check
 from ylj.probe import probe as probe_hardware
 from ylj.rag import query
 
@@ -88,6 +89,12 @@ def probe(request: Request):
     return probe_hardware()
 
 
+@app.get("/api/setup/ollama-status")
+def ollama_status():
+    """Check whether the Ollama daemon is reachable and list pulled models."""
+    return ollama_status_check()
+
+
 class SetupConfig(BaseModel):
     llm_model: str
     embedding_model: str
@@ -135,13 +142,13 @@ def apply_setup(config: SetupConfig):
                 check=True, capture_output=True,
             )
 
-            # Download LLM
+            # Pull LLM via Ollama
             _setup_status["message"] = (
-                f"Downloading LLM ({config.llm_model})... This may take a while."
+                f"Pulling LLM ({config.llm_model}) via Ollama... This may take a while."
             )
             subprocess.run(
-                ["hf", "download", "--", config.llm_model],
-                check=True, capture_output=True,
+                ["ollama", "pull", "--", config.llm_model],
+                check=True, capture_output=True, timeout=600,
             )
 
             # Ingest documents from the configured folder

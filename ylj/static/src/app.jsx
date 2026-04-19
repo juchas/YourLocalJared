@@ -14,8 +14,31 @@ function App() {
   const [embId, setEmbId] = useState('nomic-embed');
   const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
   const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [ollama, setOllama] = useState({ running: null, version: null, models: [] });
 
   useEffect(() => { localStorage.setItem('ylj-step', step); }, [step]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fallback = { running: false, version: null, models: [] };
+    const normalize = (d) => ({
+      running: !!(d && d.running),
+      version: d && typeof d.version === 'string' ? d.version : null,
+      models: d && Array.isArray(d.models) ? d.models : [],
+    });
+    const check = () => {
+      fetch('/api/setup/ollama-status')
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+        .then((d) => { if (!cancelled) setOllama(normalize(d)); })
+        .catch(() => { if (!cancelled) setOllama(fallback); });
+    };
+    check();
+    const iv = setInterval(check, 10000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, []);
 
   useEffect(() => {
     const handler = (e) => {
@@ -56,7 +79,11 @@ function App() {
         {screen}
       </div>
       {tweaks.showStatusBar && <StatusLine items={[
-        { dot: 'on',   text: 'ollama 0.3.12' },
+        ollama.running
+          ? { dot: 'on',  text: `ollama ${ollama.version || ''}`.trim() }
+          : ollama.running === false
+            ? { dot: 'warn', text: 'ollama: not running' }
+            : { text: 'ollama: checking…' },
         { dot: 'on',   text: `model ${llmId}` },
         { text: `emb ${embId}` },
         { text: `${folders.filter(f=>f.selected).length} folders` },

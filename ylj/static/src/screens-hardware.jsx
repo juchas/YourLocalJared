@@ -72,17 +72,17 @@ function ScreenHardware({ onNext, onBack }) {
     };
   }, [nonce]);
 
+  const FALLBACK_TIER = {
+    label: 'conservative',
+    chip7: 'slow',
+    chip13: false,
+    chip30: false,
+    chip70: false,
+    msg: 'probe failed — using conservative defaults.',
+  };
+
   const tier = (() => {
-    if (error) {
-      return {
-        label: 'conservative',
-        chip7: 'slow',
-        chip13: false,
-        chip30: false,
-        chip70: false,
-        msg: 'probe failed — using conservative defaults.',
-      };
-    }
+    if (error) return FALLBACK_TIER;
     if (!data) return { label: 'probing', chip7: null, chip13: null, chip30: null, chip70: null, msg: '' };
     const totalGb = Number(data.ram.total_gb);
     const availableGb = Number(data.ram.available_gb);
@@ -95,7 +95,7 @@ function ScreenHardware({ onNext, onBack }) {
     if (gb >= 48 && accel) return { label: 'high', chip7: true, chip13: true, chip30: true, chip70: 'slow', msg: 'you can run 7B–30B comfortably; 70B usable but slow.' };
     if (gb >= 24) return { label: 'capable', chip7: true, chip13: true, chip30: 'slow', chip70: false, msg: 'you can run 7B–13B comfortably. 30B possible but slow.' };
     if (gb >= 12) return { label: 'modest', chip7: true, chip13: 'slow', chip30: false, chip70: false, msg: '7B models should run; 13B will be slow.' };
-    return { label: 'limited', chip7: 'slow', chip13: false, chip30: false, chip70: false, msg: 'low RAM — stick to small 3B–7B quantised models.' };
+    return FALLBACK_TIER;
   })();
 
   const chipLabel = (name, v) => {
@@ -147,6 +147,7 @@ function ScreenHardware({ onNext, onBack }) {
           </ColHeader>
           {rows.map((r, i) => {
             const probed = data && progress > i;
+            const failed = !data && error;
             return (
               <Row key={r.label} accent={probed ? 'var(--accent)' : error ? 'var(--warn)' : 'var(--border-hi)'}>
                 <Icon name={r.icon} size={14} style={{ color: probed ? 'var(--accent-hi)' : error ? 'var(--warn)' : 'var(--text-dimmer)' }} />
@@ -155,17 +156,19 @@ function ScreenHardware({ onNext, onBack }) {
                 </span>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                   <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {probed ? r.value : error ? '—' : '…'}
+                    {probed ? r.value : failed ? 'unknown' : '…'}
                   </span>
                   <span style={{ fontSize: 10, color: 'var(--text-dimmer)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {probed ? r.meta : error ? 'probe failed' : 'probing'}
+                    {probed ? r.meta : failed ? 'probe failed' : 'probing'}
                   </span>
                 </div>
-                {probed ? <Chip tone={r.tone}>{r.tone === 'warn' ? 'check' : 'ok'}</Chip> : error ? <Chip tone="warn">failed</Chip> : <span style={{
-                  width: 10, height: 10, borderRadius: '50%',
-                  background: 'var(--border)',
-                  animation: 'pulse 1s ease-in-out infinite',
-                }} />}
+                {probed ? <Chip tone={r.tone}>{r.tone === 'warn' ? 'check' : 'ok'}</Chip>
+                  : failed ? <Chip tone="warn">n/a</Chip>
+                  : <span style={{
+                      width: 10, height: 10, borderRadius: '50%',
+                      background: 'var(--border)',
+                      animation: 'pulse 1s ease-in-out infinite',
+                    }} />}
               </Row>
             );
           })}
