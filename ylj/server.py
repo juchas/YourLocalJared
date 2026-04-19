@@ -73,12 +73,10 @@ def probe(request: Request):
     def is_loopback_host(host: str | None) -> bool:
         if host is None:
             return False
-        is_loopback = False
         try:
-            is_loopback = ip_address(host).is_loopback
+            return ip_address(host).is_loopback
         except ValueError:
-            is_loopback = host in {"localhost", "127.0.0.1", "::1"}
-        return is_loopback
+            return host in {"localhost", "127.0.0.1", "::1"}
 
     # Guard on both transport peer and request host. This avoids relying
     # solely on request.client.host, which may be loopback behind a reverse proxy.
