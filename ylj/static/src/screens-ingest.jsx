@@ -244,6 +244,10 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           </div>
         )}
 
+        {/* When `error` is set we route `onNext` to `onBack` so the
+            user has a working escape hatch — that's why the button is
+            intentionally enabled (`!done && !error`) rather than the
+            naive `!done || !!error` which would leave them stuck. */}
         <StepNav onBack={onBack} onNext={error ? onBack : onNext}
           nextLabel={error ? 'go back' : done ? 'run a test query' : 'indexing…'}
           nextDisabled={!done && !error} />

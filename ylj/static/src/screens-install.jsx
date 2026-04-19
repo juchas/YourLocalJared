@@ -160,6 +160,8 @@ function ScreenInstall({ onNext, onBack, llmId, embId }) {
         )}
 
         <div style={{ flex: 1 }} />
+        {/* See screens-ingest.jsx — same intentional `!done && !error`
+            disabled-rule so the user can fall back to "go back" on error. */}
         <StepNav onBack={onBack} onNext={error ? onBack : onNext}
           nextLabel={done && !error ? 'start ingest' : error ? 'go back' : 'downloading…'}
           nextDisabled={!done && !error} />
