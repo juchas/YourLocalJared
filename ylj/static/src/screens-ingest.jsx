@@ -10,7 +10,12 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
   const estimatedFiles = selectedFolders.reduce((a, b) => a + (b.files || 0), 0)
     * ((fileTypes || []).filter(t => t.on).length / Math.max(1, (fileTypes || []).length));
 
-  const phases = ['scan', 'parse', 'chunk', 'embed', 'store'];
+  // Keep this list in lock-step with the phases the backend emits in
+  // `ingest_stream()` (ylj/ingest.py). Adding a label that the server never
+  // emits leaves an unreachable step in the UI, and skipping one shifts the
+  // indices below.
+  const phases = ['scan', 'parse', 'embed', 'store'];
+  const phaseIndex = { scan: 0, parse: 1, embed: 2, store: 3 };
   const [phaseIdx, setPhaseIdx] = useState(0);
   const [totalFiles, setTotalFiles] = useState(Math.max(1, Math.floor(estimatedFiles)));
   const [filesProcessed, setFilesProcessed] = useState(0);
@@ -33,17 +38,25 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
     const controller = new AbortController();
     let cancelled = false;
     startRef.current = performance.now();
+    // Reset progress when inputs change so a re-run doesn't render
+    // mixed counters from a previous attempt.
+    setPhaseIdx(0);
+    setFilesProcessed(0);
+    setChunks(0);
+    setDone(false);
+    setError(null);
+    setLog([]);
     const stamp = () => ((performance.now() - startRef.current) / 1000).toFixed(2);
 
     const handleEvent = (ev) => {
       if (cancelled) return;
       switch (ev.phase) {
         case 'scan':
-          setPhaseIdx(i => Math.max(i, 1));
+          setPhaseIdx(i => Math.max(i, phaseIndex.scan));
           setTotalFiles(Math.max(1, ev.total_files | 0));
           break;
         case 'parse': {
-          setPhaseIdx(i => Math.max(i, 2));
+          setPhaseIdx(i => Math.max(i, phaseIndex.parse));
           if (typeof ev.files_done === 'number') setFilesProcessed(ev.files_done);
           if (typeof ev.chunks === 'number') setChunks(c => c + ev.chunks);
           const displayFile = typeof ev.file === 'string'
@@ -55,13 +68,13 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           break;
         }
         case 'embed':
-          setPhaseIdx(i => Math.max(i, 3));
+          setPhaseIdx(i => Math.max(i, phaseIndex.embed));
           break;
         case 'store':
-          setPhaseIdx(4);
+          setPhaseIdx(i => Math.max(i, phaseIndex.store));
           break;
         case 'done':
-          setPhaseIdx(4);
+          setPhaseIdx(phaseIndex.store);
           if (typeof ev.files === 'number') setFilesProcessed(ev.files);
           if (typeof ev.chunks === 'number') setChunks(ev.chunks);
           setDone(true);
@@ -74,11 +87,17 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
     };
 
     const run = async () => {
-      if (selectedFolders.length === 0) {
+      // `folders` is fetched async in app.jsx; if a reload lands us
+      // straight on step 07 the array can be empty for the first frames.
+      // Wait for it to populate before deciding whether nothing was
+      // selected.
+      if (!folders) return;
+      if (folders.length > 0 && selectedFolders.length === 0) {
         setError('No folders selected. Go back to step 03 and pick at least one.');
         setDone(true);
         return;
       }
+      if (selectedFolders.length === 0) return;
       try {
         const r = await fetch('/api/setup/ingest', {
           method: 'POST',
@@ -96,6 +115,11 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
         const reader = r.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let sawTerminal = false;
+        const feed = (ev) => {
+          if (ev && (ev.phase === 'done' || ev.phase === 'error')) sawTerminal = true;
+          handleEvent(ev);
+        };
         while (true) {
           const { done: streamDone, value } = await reader.read();
           if (streamDone) break;
@@ -106,12 +130,21 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
             const line = buffer.slice(0, nl).trim();
             buffer = buffer.slice(nl + 1);
             if (!line) continue;
-            try { handleEvent(JSON.parse(line)); } catch { /* skip malformed */ }
+            try { feed(JSON.parse(line)); } catch { /* skip malformed */ }
           }
         }
-        if (!cancelled) {
-          // Server closed the stream without a `done` event — assume success.
-          setDone(d => d || true);
+        // Flush any trailing partial line.
+        const tail = buffer.trim();
+        if (tail) {
+          try { feed(JSON.parse(tail)); } catch { /* skip malformed */ }
+        }
+        if (!cancelled && !sawTerminal) {
+          // `ingest_stream()` always yields a `done` (or `error`) event on
+          // the happy path, so an early close almost always means the
+          // network/connection dropped. Surface that instead of pretending
+          // we made it to 100%.
+          setError('Connection closed before ingest finished (unexpected end of stream).');
+          setDone(true);
         }
       } catch (e) {
         if (cancelled || e?.name === 'AbortError') return;
@@ -122,7 +155,10 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
 
     run();
     return () => { cancelled = true; controller.abort(); };
-  }, []);
+    // Re-run when the folder/filetype selection becomes available or
+    // changes (e.g. browser reload landing directly on step 07 before
+    // /api/setup/folders has resolved).
+  }, [folders, fileTypes]);
 
   const pct = totalFiles > 0 ? Math.min(100, (filesProcessed / totalFiles) * 100) : (done ? 100 : 0);
   const displayPct = done && !error ? 100 : pct;
@@ -208,9 +244,9 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           </div>
         )}
 
-        <StepNav onBack={onBack} onNext={onNext}
-          nextLabel={error ? 'fix and retry' : done ? 'run a test query' : 'indexing…'}
-          nextDisabled={!done || !!error} />
+        <StepNav onBack={onBack} onNext={error ? onBack : onNext}
+          nextLabel={error ? 'go back' : done ? 'run a test query' : 'indexing…'}
+          nextDisabled={!done && !error} />
       </div>
 
       <div style={{ flex: '1 1 45%', borderLeft: '1px solid var(--border)', background: 'var(--bg-alt)', display: 'flex', flexDirection: 'column' }}>

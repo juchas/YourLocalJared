@@ -9,6 +9,20 @@ function ScreenInstall({ onNext, onBack, llmId, embId }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    // Reset state when selections change so a fresh run replaces any
+    // previous attempt cleanly (e.g. browser reload landing back on this
+    // step before /api/config has resolved).
+    setLogs([]);
+    setLlmP(0);
+    setEmbP(0);
+    setDone(false);
+    setError(null);
+
+    if (!llmId || !embId) {
+      // Wait for the parent to finish resolving model selections before
+      // declaring "missing"; the values arrive async via /api/config.
+      return;
+    }
     if (!llm || !emb) {
       setError('Missing LLM or embedding selection.');
       setDone(true);
@@ -93,7 +107,7 @@ function ScreenInstall({ onNext, onBack, llmId, embId }) {
     setTimeout(tick, 600);
 
     return () => { stopped = true; };
-  }, []);
+  }, [llmId, embId]);
 
   return (
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -146,7 +160,9 @@ function ScreenInstall({ onNext, onBack, llmId, embId }) {
         )}
 
         <div style={{ flex: 1 }} />
-        <StepNav onBack={onBack} onNext={onNext} nextLabel={done && !error ? 'start ingest' : error ? 'fix and retry' : 'downloading…'} nextDisabled={!done || !!error} />
+        <StepNav onBack={onBack} onNext={error ? onBack : onNext}
+          nextLabel={done && !error ? 'start ingest' : error ? 'go back' : 'downloading…'}
+          nextDisabled={!done && !error} />
       </div>
 
       <div style={{ flex: '1 1 45%', borderLeft: '1px solid var(--border)', background: 'var(--bg-alt)', display: 'flex', flexDirection: 'column' }}>

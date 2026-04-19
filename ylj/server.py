@@ -161,9 +161,17 @@ class SetupConfig(BaseModel):
 
 
 @app.post("/api/setup/apply")
-def apply_setup(config: SetupConfig):
+def apply_setup(config: SetupConfig, request: Request):
     """Save configuration to .env and trigger model downloads. Ingestion is
-    handled separately by `/api/setup/ingest` (step 07 in the wizard)."""
+    handled separately by `/api/setup/ingest` (step 07 in the wizard).
+
+    Localhost only — this endpoint writes `.env` and spawns subprocesses
+    (Ollama pull + sentence-transformers download), neither of which should
+    be reachable from the LAN given the server defaults to binding 0.0.0.0
+    for the onboarding flow.
+    """
+    if not _is_loopback_request(request):
+        raise HTTPException(status_code=403, detail="apply endpoint is localhost only")
     global _setup_status
     project_root = Path(__file__).parent.parent
     env_path = project_root / ".env"

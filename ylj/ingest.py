@@ -53,11 +53,16 @@ def ingest_stream(
 ) -> Iterator[dict]:
     """Run the ingest pipeline, yielding progress events.
 
+    Embedding and storage happen incrementally in `EMBED_BATCH`-sized
+    batches as files are parsed, so peak memory stays bounded regardless
+    of how many GB of documents the user pointed us at and `embed`/`store`
+    progress events reflect real work rather than a single end-of-run flush.
+
     Event shapes:
         {"phase": "scan",  "total_files": int}
         {"phase": "parse", "file": str, "chunks": int, "ms": int, "files_done": int}
-        {"phase": "embed", "batch": int, "batches": int}
-        {"phase": "store", "batch": int, "batches": int}
+        {"phase": "embed", "chunks_done": int}
+        {"phase": "store", "chunks_done": int}
         {"phase": "done",  "files": int, "chunks": int}
         {"phase": "error", "message": str}
     """
@@ -73,12 +78,30 @@ def ingest_stream(
             yield {"phase": "done", "files": 0, "chunks": 0}
             return
 
-        all_chunks = []
+        model = get_embedding_model()
+
+        buffer: list = []
+        total_chunks = 0
+
+        def flush():
+            """Embed + upsert whatever's in `buffer`, yielding phase events."""
+            nonlocal buffer
+            if not buffer:
+                return
+            batch = buffer
+            buffer = []
+            texts = [c.text for c in batch]
+            yield {"phase": "embed", "chunks_done": total_chunks}
+            embeddings = model.encode(texts, show_progress_bar=False).tolist()
+            yield {"phase": "store", "chunks_done": total_chunks}
+            upsert_chunks(batch, embeddings)
+
         for idx, path in enumerate(files, start=1):
             t0 = time.perf_counter()
             raw = parse_document(path)
             chunked = split_chunks(raw)
-            all_chunks.extend(chunked)
+            buffer.extend(chunked)
+            total_chunks += len(chunked)
             yield {
                 "phase": "parse",
                 "file": str(path),
@@ -86,31 +109,20 @@ def ingest_stream(
                 "ms": int((time.perf_counter() - t0) * 1000),
                 "files_done": idx,
             }
+            while len(buffer) >= EMBED_BATCH:
+                # Carve off exactly one batch so memory stays bounded even
+                # when a single file produces many chunks.
+                head, buffer = buffer[:EMBED_BATCH], buffer[EMBED_BATCH:]
+                texts = [c.text for c in head]
+                yield {"phase": "embed", "chunks_done": total_chunks - len(buffer)}
+                embeddings = model.encode(texts, show_progress_bar=False).tolist()
+                yield {"phase": "store", "chunks_done": total_chunks - len(buffer)}
+                upsert_chunks(head, embeddings)
 
-        if not all_chunks:
-            yield {"phase": "done", "files": len(files), "chunks": 0}
-            return
+        # Flush the trailing partial batch.
+        yield from flush()
 
-        texts = [c.text for c in all_chunks]
-        batches = (len(texts) + EMBED_BATCH - 1) // EMBED_BATCH
-        model = get_embedding_model()
-        all_embeddings: list[list[float]] = []
-        for i in range(0, len(texts), EMBED_BATCH):
-            batch_texts = texts[i : i + EMBED_BATCH]
-            batch_emb = model.encode(batch_texts, show_progress_bar=False).tolist()
-            all_embeddings.extend(batch_emb)
-            yield {
-                "phase": "embed",
-                "batch": (i // EMBED_BATCH) + 1,
-                "batches": batches,
-            }
-
-        # upsert_chunks batches internally; surface one store-started + store-done event
-        yield {"phase": "store", "batch": 0, "batches": 1}
-        upsert_chunks(all_chunks, all_embeddings)
-        yield {"phase": "store", "batch": 1, "batches": 1}
-
-        yield {"phase": "done", "files": len(files), "chunks": len(all_chunks)}
+        yield {"phase": "done", "files": len(files), "chunks": total_chunks}
     except Exception as e:
         yield {"phase": "error", "message": str(e)}
 
@@ -118,22 +130,23 @@ def ingest_stream(
 def ingest(directory: Path) -> None:
     """CLI wrapper — consume the event stream and print human-readable progress."""
     errored = False
+    last_phase = None
     for ev in ingest_stream([directory]):
         phase = ev.get("phase")
         if phase == "scan":
             print(f"Found {ev['total_files']} files to ingest.")
         elif phase == "parse":
             print(f"  [{ev['files_done']}] {ev['file']} → {ev['chunks']} chunks ({ev['ms']}ms)")
-        elif phase == "embed":
-            print(f"Embedding batch {ev['batch']}/{ev['batches']}")
-        elif phase == "store":
-            if ev["batch"] == 0:
-                print("Storing chunks...")
+        elif phase == "embed" and last_phase != "embed":
+            print(f"Embedding chunks (batch starts at {ev.get('chunks_done', 0)})...")
+        elif phase == "store" and last_phase != "store":
+            print("Storing chunks...")
         elif phase == "done":
             print(f"Done: {ev.get('files', 0)} files, {ev.get('chunks', 0)} chunks.")
         elif phase == "error":
             print(f"Error: {ev['message']}")
             errored = True
+        last_phase = phase
     if errored:
         raise SystemExit(1)
 
