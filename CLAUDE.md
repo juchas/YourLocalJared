@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**YourLocalJared** — A fully local RAG (Retrieval-Augmented Generation) system. Users ingest documents (PDF, DOCX, XLSX, PPTX, TXT, MD, CSV), which get chunked, embedded, and stored in Qdrant. Queries go through an OpenAI-compatible API that retrieves relevant chunks and generates answers using a local Mistral model via Hugging Face Transformers.
+**YourLocalJared** — A fully local RAG (Retrieval-Augmented Generation) system. Users ingest documents (PDF, DOCX, XLSX, PPTX, TXT, MD, CSV), which get chunked, embedded, and stored in Qdrant. Queries go through an OpenAI-compatible API that retrieves relevant chunks and generates answers using a model served by the local Ollama daemon.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ FastAPI server (ylj/server.py, port 8000)
 RAG pipeline (ylj/rag.py)
     ├── Embed query (ylj/embeddings.py) → sentence-transformers
     ├── Vector search (ylj/vectorstore.py) → Qdrant (local file storage)
-    └── Generate answer (ylj/llm.py) → Mistral via Transformers
+    └── Generate answer (ylj/llm.py) → Ollama HTTP (localhost:11434)
 ```
 
 - `ylj/config.py` — All settings, driven by env vars (see `.env.example`)
@@ -51,5 +51,5 @@ pytest tests/test_specific.py -k "test_name"
 
 - **No Docker required**: Qdrant runs in local file-based mode (`./qdrant_data/`). Open WebUI is optional and connects to the API server.
 - **OpenAI-compatible API**: The server mimics the `/v1/chat/completions` endpoint so Open WebUI connects natively without custom pipes.
-- **Transformers (not llama.cpp)**: Using HF Transformers directly for model inference; supports CPU, CUDA, and MPS (Apple Silicon).
+- **Ollama for LLM inference**: LLM calls go through the local Ollama daemon (default `http://localhost:11434`, configurable via `YLJ_OLLAMA_HOST`). Setup shells out to `ollama pull` to fetch the chosen model. Embeddings still run via sentence-transformers.
 - **All config via env vars**: Every setting in `ylj/config.py` can be overridden with `YLJ_` prefixed environment variables.

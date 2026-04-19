@@ -8,18 +8,21 @@ import subprocess
 import threading
 import time
 import uuid
+from ipaddress import ip_address
 from pathlib import Path
 
 import psutil
 import torch
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ylj import scanner
 from ylj.config import LLM_MODEL, SERVER_HOST, SERVER_PORT
+from ylj.llm import status as ollama_status_check
+from ylj.probe import probe as probe_hardware
 from ylj.rag import query
 
 app = FastAPI(title="YourLocalJared RAG API")
@@ -61,6 +64,36 @@ def system_info():
     elif torch.backends.mps.is_available():
         device = "mps"
     return {"ram_gb": ram_gb, "device": device}
+
+
+@app.get("/api/setup/probe")
+def probe(request: Request):
+    """Detailed hardware probe for the onboarding wizard (localhost only)."""
+    client_host = request.client.host if request.client else None
+    request_host = request.url.hostname
+
+    def is_loopback_host(host: str | None) -> bool:
+        if host is None:
+            return False
+        try:
+            return ip_address(host).is_loopback
+        except ValueError:
+            return host in {"localhost", "127.0.0.1", "::1"}
+
+    # Guard on both transport peer and request host. This avoids relying
+    # solely on request.client.host, which may be loopback behind a reverse proxy.
+    is_loopback = is_loopback_host(client_host) and is_loopback_host(request_host)
+
+    if not is_loopback:
+        raise HTTPException(status_code=403, detail="probe endpoint is localhost only")
+
+    return probe_hardware()
+
+
+@app.get("/api/setup/ollama-status")
+def ollama_status():
+    """Check whether the Ollama daemon is reachable and list pulled models."""
+    return ollama_status_check()
 
 
 @app.get("/api/setup/folders")
@@ -130,13 +163,13 @@ def apply_setup(config: SetupConfig):
                 check=True, capture_output=True,
             )
 
-            # Download LLM
+            # Pull LLM via Ollama
             _setup_status["message"] = (
-                f"Downloading LLM ({config.llm_model})... This may take a while."
+                f"Pulling LLM ({config.llm_model}) via Ollama... This may take a while."
             )
             subprocess.run(
-                ["hf", "download", config.llm_model],
-                check=True, capture_output=True,
+                ["ollama", "pull", "--", config.llm_model],
+                check=True, capture_output=True, timeout=600,
             )
 
             # Ingest documents from the configured folder
