@@ -9,7 +9,7 @@ function fmtTime(ts) {
   return Math.floor(d / 86400000) + 'd';
 }
 
-function Sidebar({ conversations, activeId, onSelect, onNew, collapsed, onToggle }) {
+function Sidebar({ conversations, activeId, onSelect, onNew, collapsed, onToggle, modelId }) {
   const [query, setQuery] = useState('');
   const [section, setSection] = useState('chats'); // chats | sources | stats
 
@@ -144,17 +144,17 @@ function Sidebar({ conversations, activeId, onSelect, onNew, collapsed, onToggle
             <KV label="last scan" value="2m ago" />
             <div style={{ height: 18 }} />
             <div style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-dimmer)', marginBottom: 10 }}>runtime</div>
-            <KV label="llm" value="qwen 2.5 · 7b" />
-            <KV label="cpu" value="18% · m3 pro" />
-            <KV label="ram" value="8.4 / 36 GB" />
-            <KV label="latency p50" value="82 ms" />
+            <KV label="llm" value={modelId || '—'} />
+            <KV label="cpu" value="—" />
+            <KV label="ram" value="—" />
+            <KV label="latency p50" value="—" />
           </div>
         )}
       </div>
 
       <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 2s ease-in-out infinite' }} />
-        <span style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>api :8080 · idle</span>
+        <span style={{ fontSize: 10, color: 'var(--text-dim)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>api :8000 · idle</span>
         <div style={{ flex: 1 }} />
         <button style={{ color: 'var(--text-dim)' }}><Icon name="cog" size={11} /></button>
       </div>

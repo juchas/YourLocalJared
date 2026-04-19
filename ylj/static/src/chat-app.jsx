@@ -58,14 +58,44 @@ function TweaksPanel({ tweaks, setTweaks, onClose }) {
 }
 
 function App() {
-  const [conversations, setConversations] = useState(CONVERSATIONS);
-  const [activeId, setActiveId] = useState(() => localStorage.getItem('ylj-chat') || 'c1');
+  // Land on a fresh blank chat so the composer is ready to type into — the
+  // CONVERSATIONS fixtures stay in the sidebar as demo content, but the user
+  // never starts inside one of them. Kept in a ref so both useStates below
+  // agree on the same generated id.
+  const initRef = useRef(null);
+  if (!initRef.current) {
+    const id = 'c' + Date.now();
+    const blank = { id, title: 'new chat', preview: '', updated: Date.now(), messages: [] };
+    initRef.current = { conversations: [blank, ...CONVERSATIONS], activeId: id };
+  }
+  const [conversations, setConversations] = useState(initRef.current.conversations);
+  const [activeId, setActiveId] = useState(initRef.current.activeId);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 900);
   const [sourcesOpen, setSourcesOpen] = useState(() => window.innerWidth >= 1100);
   const [sourcesFor, setSourcesFor] = useState(null);
   const [sourcesFocus, setSourcesFocus] = useState(0);
   const [streaming, setStreaming] = useState(null);
-  const [modelId, setModelId] = useState('qwen2.5:7b');
+  const [modelId, setModelId] = useState('');
+
+  // Resolve the active model from backend config, falling back to whatever
+  // Ollama has actually pulled. No model id is ever hardcoded in the UI.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/config')
+      .then(r => r.ok ? r.json() : null)
+      .then(c => {
+        if (cancelled) return;
+        if (c && c.llm_model) { setModelId(c.llm_model); return; }
+        return fetch('/api/setup/ollama-status')
+          .then(r => r.ok ? r.json() : null)
+          .then(d => {
+            if (cancelled || !d || !Array.isArray(d.models) || !d.models.length) return;
+            setModelId(d.models[0]);
+          });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const [scopeId, setScopeId] = useState('all');
   const [k, setK] = useState(3);
   const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
@@ -241,6 +271,7 @@ function App() {
           onNew={newChat}
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed(v => !v)}
+          modelId={modelId}
         />
       )}
 

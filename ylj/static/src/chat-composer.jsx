@@ -17,8 +17,8 @@ function Composer({ onSend, streaming, onStop, modelId, setModelId, scopeId, set
     setValue('');
   };
 
-  const model = MODELS.find(m => m.id === modelId);
-  const scope = SCOPES.find(s => s.id === scopeId);
+  const model = MODELS.find(m => m.id === modelId) || { name: modelId || 'model', size: '' };
+  const scope = SCOPES.find(s => s.id === scopeId) || { label: scopeId || 'all' };
 
   return (
     <div style={{ borderTop: '1px solid var(--border)', background: 'var(--bg)', padding: '14px 48px 16px', position: 'relative' }}>
