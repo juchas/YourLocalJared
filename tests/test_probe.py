@@ -8,8 +8,10 @@ def test_probe_shape():
 
     assert set(result.keys()) >= {
         "os", "chip", "cpu", "python", "ram", "disk", "gpu",
-        "cuda_available", "mps_available",
+        "cuda_available", "mps_available", "recommended_model",
     }
+
+    assert result["recommended_model"] in {"phi3.5:mini", "qwen2.5:7b"}
 
     assert isinstance(result["chip"], str) and result["chip"]
 

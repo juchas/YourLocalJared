@@ -60,6 +60,19 @@ def detect_gpu() -> tuple[dict, bool, bool]:
     return {"name": "none", "backend": "cpu"}, cuda, mps
 
 
+def recommend_model(ram_total_gb: float, has_accelerator: bool) -> str:
+    """Pick a sensible default LLM from the hardware tier.
+
+    Mirrors the tier buckets rendered in screens-hardware.jsx so the
+    backend default and the UI's suggested chip can't disagree.
+    """
+    if ram_total_gb < 12:
+        return "phi3.5:mini"
+    if ram_total_gb < 24 and not has_accelerator:
+        return "phi3.5:mini"
+    return "qwen2.5:7b"
+
+
 def probe(disk_path: str | Path | None = None) -> dict:
     """Detailed hardware probe for the onboarding wizard.
 
@@ -71,6 +84,7 @@ def probe(disk_path: str | Path | None = None) -> dict:
     path = Path(disk_path) if disk_path else Path(__file__).parent.parent
     disk = shutil.disk_usage(str(path))
     gpu_info, cuda_available, mps_available = detect_gpu()
+    ram_total_gb = round(vm.total / (1024**3), 1)
 
     return {
         "os": {
@@ -90,7 +104,7 @@ def probe(disk_path: str | Path | None = None) -> dict:
             "version": platform.python_version(),
         },
         "ram": {
-            "total_gb": round(vm.total / (1024**3), 1),
+            "total_gb": ram_total_gb,
             "available_gb": round(vm.available / (1024**3), 1),
         },
         "disk": {
@@ -100,4 +114,5 @@ def probe(disk_path: str | Path | None = None) -> dict:
         "gpu": gpu_info,
         "cuda_available": cuda_available,
         "mps_available": mps_available,
+        "recommended_model": recommend_model(ram_total_gb, cuda_available or mps_available),
     }

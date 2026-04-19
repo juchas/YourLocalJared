@@ -4,11 +4,11 @@ version = "0.1.0"
 description = "Local RAG implementation with Qdrant, Mistral, and Open WebUI"
 requires-python = ">=3.10"
 dependencies = [
-    # LLM & Embeddings
+    # LLM (via local Ollama daemon) & embeddings
+    "httpx>=0.27.0",
     "transformers>=4.40.0",
     "torch>=2.2.0",
     "sentence-transformers>=3.0.0",
-    "accelerate>=0.30.0",
 
     # Vector DB
     "qdrant-client>=1.9.0",
