@@ -10,6 +10,10 @@ on:
   issues:
     types: [opened, assigned]
 
+concurrency:
+  group: claude-code-${{ github.event.issue.number || github.event.pull_request.number || github.event.comment.id }}
+  cancel-in-progress: true
+
 jobs:
   claude:
     if: |
@@ -18,6 +22,7 @@ jobs:
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
       pull-requests: write
@@ -32,22 +37,13 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # No `model:` pin — fall back to the action's default (latest
-          # Sonnet). Pinning to `claude-opus-4-7` caused the action to
-          # fail silently (eyes reaction, no response) because the ID
-          # wasn't recognised by the action's model catalog at the time.
-          # Re-add once Opus 4.7 is officially supported.
+          # No `model:` pin — fall back to the action's default Sonnet.
+          # Opus 4.7 isn't in the action's catalog yet; re-pin once it is.
           prompt: |
-            When the user asks you to review a pull request (e.g. "@claude
-            review this PR"), submit a formal GitHub review using the
-            pull_request_review_write tool with `method: create` and an
-            explicit `event` of APPROVE, REQUEST_CHANGES, or COMMENT — do
-            not just post a plain issue comment.
+            When asked to review a pull request, post a formal GitHub
+            pull-request review with an explicit event
+            (APPROVE / REQUEST_CHANGES / COMMENT) and line-level inline
+            comments where appropriate — not a plain issue comment.
 
-            Include inline comments on specific lines when flagging issues
-            so the review lands in the PR's Reviews section and shows the
-            standard GitHub review state (approved / changes requested /
-            commented), not a loose comment in the conversation thread.
-
-            For other mentions (fix X, answer a question, run a task),
-            continue to respond however makes sense for the request.
+            For any other request (fix X, answer a question, run a task),
+            respond however makes sense.
