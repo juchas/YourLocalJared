@@ -39,6 +39,13 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # No `model:` pin — fall back to the action's default Sonnet.
           # Opus 4.7 isn't in the action's catalog yet; re-pin once it is.
+          #
+          # Explicitly allow the GitHub review tools. Without this the
+          # agent hits `permission_denials_count: 1` when trying to
+          # submit a formal review and exits silently.
+          claude_args: >-
+            --allowedTools
+            mcp__github__create_pending_pull_request_review,mcp__github__add_pull_request_review_comment_to_pending_review,mcp__github__submit_pending_pull_request_review,mcp__github__create_pull_request_review,Bash(gh pr review:*)
           prompt: |
             When asked to review a pull request, post a formal GitHub
             pull-request review with an explicit event
