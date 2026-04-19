@@ -104,7 +104,12 @@ def scan_folder(
     warn: str | None = None
     root_depth = len(path.parts)
 
-    stack: list[tuple[Path, int]] = [(path, 0)]
+    if not path.exists():
+        warn = "not found"
+    elif not path.is_dir():
+        warn = "not a directory"
+
+    stack: list[tuple[Path, int]] = [(path, 0)] if warn is None else []
     while stack:
         if time.monotonic() > deadline:
             warn = "scan incomplete — time budget hit"
@@ -113,30 +118,33 @@ def scan_folder(
         if depth > depth_cap:
             continue
         try:
-            entries = list(curr.iterdir())
+            for entry in curr.iterdir():
+                if time.monotonic() > deadline:
+                    warn = "scan incomplete — time budget hit"
+                    stack.clear()
+                    break
+                if _should_skip(entry):
+                    continue
+                try:
+                    if entry.is_symlink():
+                        continue  # don't follow symlinks; they can escape
+                    if entry.is_dir():
+                        stack.append((entry, depth + 1))
+                        continue
+                    if not entry.is_file():
+                        continue
+                    stat = entry.stat()
+                except (OSError, PermissionError):
+                    continue
+                file_count += 1
+                total_bytes += stat.st_size
+                extensions[entry.suffix.lower()] += 1
+                if file_count >= file_cap:
+                    warn = f"heavy — {file_cap:,}+ files"
+                    stack.clear()
+                    break
         except (OSError, PermissionError):
             continue
-        for entry in entries:
-            if _should_skip(entry):
-                continue
-            try:
-                if entry.is_symlink():
-                    continue  # don't follow symlinks; they can escape
-                if entry.is_dir():
-                    stack.append((entry, depth + 1))
-                    continue
-                if not entry.is_file():
-                    continue
-                stat = entry.stat()
-            except (OSError, PermissionError):
-                continue
-            file_count += 1
-            total_bytes += stat.st_size
-            extensions[entry.suffix.lower()] += 1
-            if file_count >= file_cap:
-                warn = f"heavy — {file_cap:,}+ files"
-                stack.clear()
-                break
 
     del root_depth  # reserved for future per-subtree reporting
     return {

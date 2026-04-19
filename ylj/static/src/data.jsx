@@ -40,16 +40,22 @@ const FILETYPES = [
 
 function computeFileTypeCounts(folders, fileTypes) {
   // Sum folder.extensions across selected folders into each category's count.
+  // If no selected folder has extensions data yet, preserve the fallback
+  // counts defined in FILETYPES so offline/pre-scan rendering still works.
   const totals = {};
+  let hasExtensionsData = false;
   for (const f of folders || []) {
     if (!f.selected) continue;
+    if (f.extensions !== undefined) hasExtensionsData = true;
     for (const [ext, n] of Object.entries(f.extensions || {})) {
       totals[ext] = (totals[ext] || 0) + n;
     }
   }
   return fileTypes.map(t => ({
     ...t,
-    count: t.extensions.reduce((acc, e) => acc + (totals[e] || 0), 0),
+    count: hasExtensionsData
+      ? t.extensions.reduce((acc, e) => acc + (totals[e] || 0), 0)
+      : t.count,
   }));
 }
 

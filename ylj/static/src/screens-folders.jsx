@@ -40,9 +40,11 @@ function ScreenFolders({ onNext, onBack, folders, setFolders, ignores, setIgnore
         throw new Error(err.detail || `HTTP ${r.status}`);
       }
       const folder = await r.json();
-      // If a scan already exists for this path, treat the add as a re-scan.
+      // Dedupe by path so re-scanning the same folder (even with a
+      // different id) replaces the existing row instead of adding a
+      // duplicate.
       setFolders(fs => {
-        const idx = fs.findIndex(f => f.id === folder.id);
+        const idx = fs.findIndex(f => f.path === folder.path);
         return idx >= 0
           ? fs.map((f, i) => i === idx ? { ...folder, selected: true } : f)
           : [...fs, folder];

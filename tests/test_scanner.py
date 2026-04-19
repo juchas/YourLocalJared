@@ -58,6 +58,20 @@ def test_safe_home_path_follows_symlink_and_rejects_escape(tmp_path, monkeypatch
 # ── scan_folder ───────────────────────────────────────────
 
 
+def test_scan_folder_warns_not_found(tmp_path):
+    result = scanner.scan_folder(tmp_path / "nonexistent")
+    assert result["files"] == 0
+    assert result["warn"] == "not found"
+
+
+def test_scan_folder_warns_not_a_directory(tmp_path):
+    f = tmp_path / "file.txt"
+    f.write_text("hello")
+    result = scanner.scan_folder(f)
+    assert result["files"] == 0
+    assert result["warn"] == "not a directory"
+
+
 def test_scan_folder_counts_and_categorises(tmp_path):
     (tmp_path / "a.md").write_text("hello")
     (tmp_path / "b.pdf").write_bytes(b"%PDF-")
