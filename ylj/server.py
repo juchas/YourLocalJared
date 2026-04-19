@@ -1,13 +1,13 @@
-"""FastAPI server exposing an OpenAI-compatible chat completions endpoint.
+"""FastAPI server for YourLocalJared.
 
-Open WebUI connects to this as if it were an OpenAI API.
-Includes an onboarding wizard at /setup for first-time configuration.
+Hosts the onboarding wizard at `/setup`, the chat UI at `/chat`, and the
+endpoints they call. There is no external client — everything runs locally
+and the two HTML pages are the only consumers.
 """
 
+import hashlib
 import subprocess
 import threading
-import time
-import uuid
 from ipaddress import ip_address
 from pathlib import Path
 
@@ -196,83 +196,51 @@ def setup_status():
     return _setup_status
 
 
-# ── OpenAI-compatible API ────────────────────────────────
+# ── Chat API (used by ylj/static/chat.html) ─────────────
 class Message(BaseModel):
     role: str
     content: str
 
 
-class ChatCompletionRequest(BaseModel):
-    model: str = "local-rag"
+class ChatRequest(BaseModel):
     messages: list[Message]
-    temperature: float | None = None
-    max_tokens: int | None = None
-    stream: bool = False
+    model: str | None = None
+    k: int | None = None
 
 
-class ChatCompletionResponse(BaseModel):
-    id: str
-    object: str = "chat.completion"
-    created: int
-    model: str
-    choices: list[dict]
-    usage: dict
+def _source_id(file: str, page: int | None) -> str:
+    return hashlib.sha1(f"{file}#{page}".encode()).hexdigest()[:8]
 
 
-@app.get("/v1/models")
-def list_models():
-    """List available models (Open WebUI calls this)."""
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": "local-rag",
-                "object": "model",
-                "created": int(time.time()),
-                "owned_by": "local",
-            }
-        ],
-    }
-
-
-@app.post("/v1/chat/completions")
-def chat_completions(request: ChatCompletionRequest):
-    """OpenAI-compatible chat completions endpoint."""
-    # Use the last user message as the query
+@app.post("/api/chat")
+def chat(request: ChatRequest):
+    """Answer the last user message using local RAG + Ollama."""
     user_messages = [m for m in request.messages if m.role == "user"]
     if not user_messages:
-        return {"error": "No user message found"}
+        raise HTTPException(status_code=400, detail="no user message")
 
-    question = user_messages[-1].content
-    result = query(question)
+    model = request.model or LLM_MODEL
+    try:
+        result = query(user_messages[-1].content, top_k=request.k, model=model)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
-    # Format sources as a footnote
-    sources_text = ""
-    seen = set()
-    for s in result["sources"]:
-        key = s["source"]
-        if key not in seen:
-            seen.add(key)
-            page_info = f" (p.{s['page']})" if s.get("page") else ""
-            sources_text += f"\n- {key}{page_info}"
-
-    answer = result["answer"]
-    if sources_text:
-        answer += f"\n\n---\n**Sources:**{sources_text}"
-
-    return ChatCompletionResponse(
-        id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
-        created=int(time.time()),
-        model=LLM_MODEL,
-        choices=[
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": answer},
-                "finish_reason": "stop",
-            }
-        ],
-        usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    )
+    sources = [
+        {
+            "id": _source_id(s["source"], s.get("page")),
+            "file": s["source"],
+            "page": s.get("page"),
+            "score": s.get("score"),
+            "snippet": None,
+        }
+        for s in result.get("sources", [])
+    ]
+    return {
+        "answer": result.get("answer", ""),
+        "sources": sources,
+        "model": model,
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
 
 
 def main():

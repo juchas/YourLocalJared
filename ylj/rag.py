@@ -6,7 +6,7 @@ from ylj.llm import generate
 from ylj.vectorstore import search
 
 
-def query(question: str, top_k: int | None = None) -> dict:
+def query(question: str, top_k: int | None = None, model: str | None = None) -> dict:
     """Run a full RAG query: embed -> search -> generate."""
     k = top_k or TOP_K
 
@@ -21,7 +21,7 @@ def query(question: str, top_k: int | None = None) -> dict:
             "sources": [],
         }
 
-    answer = generate(question, results)
+    answer = generate(question, results, model=model)
 
     return {
         "answer": answer,
