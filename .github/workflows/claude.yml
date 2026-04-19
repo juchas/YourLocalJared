@@ -33,3 +33,17 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           model: claude-opus-4-7
+          prompt: |
+            When the user asks you to review a pull request (e.g. "@claude
+            review this PR"), submit a formal GitHub review using the
+            pull_request_review_write tool with `method: create` and an
+            explicit `event` of APPROVE, REQUEST_CHANGES, or COMMENT — do
+            not just post a plain issue comment.
+
+            Include inline comments on specific lines when flagging issues
+            so the review lands in the PR's Reviews section and shows the
+            standard GitHub review state (approved / changes requested /
+            commented), not a loose comment in the conversation thread.
+
+            For other mentions (fix X, answer a question, run a task),
+            continue to respond however makes sense for the request.
