@@ -68,14 +68,16 @@ function ScreenHardware({ onNext, onBack }) {
     return () => { cancelled = true; };
   }, [nonce]);
 
+  const FALLBACK_TIER = { label: 'limited', chip7: 'slow', chip13: false, chip30: false, chip70: false, msg: 'low RAM — stick to small 3B–7B quantised models.' };
+
   const tier = (() => {
-    if (!data) return { label: 'probing', chip7: null, chip13: null, chip30: null, chip70: null, msg: '' };
+    if (!data) return error ? FALLBACK_TIER : { label: 'probing', chip7: null, chip13: null, chip30: null, chip70: null, msg: '' };
     const gb = data.ram.total_gb;
     const accel = data.cuda_available || data.mps_available;
     if (gb >= 48 && accel) return { label: 'high', chip7: true, chip13: true, chip30: true, chip70: 'slow', msg: 'you can run 7B–30B comfortably; 70B usable but slow.' };
     if (gb >= 24) return { label: 'capable', chip7: true, chip13: true, chip30: 'slow', chip70: false, msg: 'you can run 7B–13B comfortably. 30B possible but slow.' };
     if (gb >= 12) return { label: 'modest', chip7: true, chip13: 'slow', chip30: false, chip70: false, msg: '7B models should run; 13B will be slow.' };
-    return { label: 'limited', chip7: 'slow', chip13: false, chip30: false, chip70: false, msg: 'low RAM — stick to small 3B–7B quantised models.' };
+    return FALLBACK_TIER;
   })();
 
   const chipLabel = (name, v) => {
