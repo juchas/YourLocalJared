@@ -111,7 +111,16 @@ function App() {
     setActiveId(id);
   };
 
-  const send = (text) => {
+  const abortRef = useRef(null);
+  const thinkTimerRef = useRef(null);
+
+  const stop = () => {
+    if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
+    if (thinkTimerRef.current) { clearTimeout(thinkTimerRef.current); thinkTimerRef.current = null; }
+    setStreaming(null);
+  };
+
+  const send = async (text) => {
     const userMsg = { id: 'u' + Date.now(), role: 'user', text, ts: Date.now() };
     setConversations(cs => cs.map(c => c.id === activeId ? {
       ...c,
@@ -121,45 +130,81 @@ function App() {
       messages: [...c.messages, userMsg],
     } : c));
 
-    // fake streaming
+    // Build wire-format history (UI state uses `text`; API expects `content`).
+    // The backend only reads the last user message today, but sending full
+    // history keeps the contract stable for future multi-turn support.
+    const convo = conversations.find(c => c.id === activeId);
+    const history = (convo?.messages || []).map(m => ({ role: m.role, content: m.text }));
+    const wire = [...history, { role: 'user', content: text }];
+
     setStreaming({ model: modelId, text: '', phase: 'retrieving' });
-
-    setTimeout(() => {
+    thinkTimerRef.current = setTimeout(() => {
       setStreaming(s => s && { ...s, phase: 'thinking' });
-    }, 500);
+    }, 300);
 
-    const reply = "okay, based on what i found in your index — " +
-      "i pulled 3 chunks that mention this. the short answer is that your past notes " +
-      "point toward **a consistent pattern**: you've been iterating on this for weeks " +
-      "and the most recent decision is in `notes/ideas/recent.md`.\n\n" +
-      "if you want me to pull the raw snippets, click any chunk in the sources panel →";
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const t0 = performance.now();
 
-    const fakeSources = [
-      { id: 'fs1', file: 'notes/ideas/recent.md',    line: '10-22', snippet: '…recent iteration points to this direction; locking it in for q2…', score: 0.89 },
-      { id: 'fs2', file: 'journal/2024-q2.md',       line: '42-48', snippet: '…reflecting on the past two weeks, the pattern is consistent…', score: 0.82 },
-      { id: 'fs3', file: 'meetings/latest.md',       line: '3-9',   snippet: '…team agreed, moving forward with the approach. ship by friday…', score: 0.76 },
-    ];
+    try {
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelId, messages: wire }),
+        signal: controller.signal,
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || err.error || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      if (controller.signal.aborted) return;
+      if (thinkTimerRef.current) { clearTimeout(thinkTimerRef.current); thinkTimerRef.current = null; }
 
-    setTimeout(() => {
-      setStreaming(s => s && { ...s, phase: 'streaming' });
+      const answer = data.answer || '';
+      const sources = Array.isArray(data.sources) ? data.sources : [];
+      const latency = Math.round(performance.now() - t0);
+
+      // Reveal the answer gradually so the UI stays alive even though
+      // the backend response is non-streaming for now.
+      setStreaming(s => s && { ...s, phase: 'streaming', text: '' });
       let i = 0;
+      const step = Math.max(1, Math.ceil(answer.length / 80));
       const iv = setInterval(() => {
-        i = Math.min(reply.length, i + 4);
-        setStreaming(s => s && { ...s, text: reply.slice(0, i) });
-        if (i >= reply.length) {
+        if (controller.signal.aborted) { clearInterval(iv); return; }
+        i = Math.min(answer.length, i + step);
+        setStreaming(s => s && { ...s, text: answer.slice(0, i) });
+        if (i >= answer.length) {
           clearInterval(iv);
           const botMsg = {
-            id: 'b' + Date.now(), role: 'assistant', text: reply, ts: Date.now(),
-            model: modelId, sources: fakeSources,
-            meta: { latency: 842, tokens: Math.floor(reply.length/4), tokensPerSec: 38 },
+            id: 'b' + Date.now(), role: 'assistant', text: answer, ts: Date.now(),
+            model: data.model || modelId, sources,
+            meta: {
+              latency,
+              tokens: Math.floor(answer.length / 4),
+              tokensPerSec: Math.round((answer.length / 4) / Math.max(latency / 1000, 0.1)),
+            },
           };
           setConversations(cs => cs.map(c => c.id === activeId ? { ...c, messages: [...c.messages, botMsg] } : c));
           setStreaming(null);
-          setSourcesFor(fakeSources);
+          setSourcesFor(sources);
           setSourcesFocus(0);
+          abortRef.current = null;
         }
-      }, 18);
-    }, 900);
+      }, 16);
+    } catch (e) {
+      if (controller.signal.aborted || e?.name === 'AbortError') return;
+      if (thinkTimerRef.current) { clearTimeout(thinkTimerRef.current); thinkTimerRef.current = null; }
+      const message = `⚠︎ chat failed: ${e.message || e}`;
+      const botMsg = {
+        id: 'b' + Date.now(), role: 'assistant', text: message, ts: Date.now(),
+        model: modelId, sources: [],
+        meta: { latency: Math.round(performance.now() - t0) },
+      };
+      setConversations(cs => cs.map(c => c.id === activeId ? { ...c, messages: [...c.messages, botMsg] } : c));
+      setStreaming(null);
+      abortRef.current = null;
+    }
   };
 
   const openSources = (sources, idx = 0) => {
@@ -225,7 +270,7 @@ function App() {
 
         <Messages conversation={conversation} onOpenSources={openSources} streaming={streaming} />
 
-        <Composer onSend={send} streaming={streaming} onStop={() => setStreaming(null)}
+        <Composer onSend={send} streaming={streaming} onStop={stop}
           modelId={modelId} setModelId={setModelId}
           scopeId={scopeId} setScopeId={setScopeId}
           k={k} setK={setK}
