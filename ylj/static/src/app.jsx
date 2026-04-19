@@ -7,7 +7,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 
 function App() {
   const [step, setStep] = useState(() => localStorage.getItem('ylj-step') || 'welcome');
-  const [folders, setFolders] = useState(FOLDERS);
+  const [folders, setFolders] = useState([]);
   const [ignores, setIgnores] = useState(IGNORES);
   const [fileTypes, setFileTypes] = useState(FILETYPES);
   const [llmId, setLlmId] = useState('qwen2.5:7b');
@@ -17,6 +17,21 @@ function App() {
   const [ollama, setOllama] = useState({ running: null, version: null, models: [] });
 
   useEffect(() => { localStorage.setItem('ylj-step', step); }, [step]);
+
+  // Fetch real folders on mount. Fall back to the fixture if the API
+  // isn't available — keeps the prototype UI usable offline.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/setup/folders')
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => {
+        if (cancelled) return;
+        if (Array.isArray(d.folders)) setFolders(d.folders);
+        if (Array.isArray(d.ignores) && d.ignores.length) setIgnores(d.ignores);
+      })
+      .catch(() => { if (!cancelled) setFolders(FOLDERS); });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,7 +76,7 @@ function App() {
       case 'welcome':  return <ScreenWelcome onNext={nextStep} />;
       case 'hardware': return <ScreenHardware onNext={nextStep} onBack={backStep} />;
       case 'folders':  return <ScreenFolders  onNext={nextStep} onBack={backStep} folders={folders} setFolders={setFolders} ignores={ignores} setIgnores={setIgnores} />;
-      case 'types':    return <ScreenFileTypes onNext={nextStep} onBack={backStep} fileTypes={fileTypes} setFileTypes={setFileTypes} />;
+      case 'types':    return <ScreenFileTypes onNext={nextStep} onBack={backStep} fileTypes={fileTypes} setFileTypes={setFileTypes} folders={folders} />;
       case 'models':   return <ScreenModels   onNext={nextStep} onBack={backStep} llmId={llmId} setLlmId={setLlmId} embId={embId} setEmbId={setEmbId} />;
       case 'install':  return <ScreenInstall  onNext={nextStep} onBack={backStep} llmId={llmId} embId={embId} />;
       case 'ingest':   return <ScreenIngest   onNext={nextStep} onBack={backStep} folders={folders} fileTypes={fileTypes} />;

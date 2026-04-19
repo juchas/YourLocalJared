@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from ylj import scanner
 from ylj.config import LLM_MODEL, SERVER_HOST, SERVER_PORT
 from ylj.llm import status as ollama_status_check
 from ylj.probe import probe as probe_hardware
@@ -93,6 +94,26 @@ def probe(request: Request):
 def ollama_status():
     """Check whether the Ollama daemon is reachable and list pulled models."""
     return ollama_status_check()
+
+
+@app.get("/api/setup/folders")
+def folders_endpoint():
+    """Return suggested home-dir folders (scanned) + default ignore patterns."""
+    return scanner.list_folders()
+
+
+class ScanFolderRequest(BaseModel):
+    path: str
+
+
+@app.post("/api/setup/scan-folder")
+def scan_folder_endpoint(body: ScanFolderRequest):
+    """Scan a user-provided path (must resolve under $HOME)."""
+    try:
+        safe = scanner.safe_home_path(body.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return scanner.scan_folder(safe)
 
 
 class SetupConfig(BaseModel):
