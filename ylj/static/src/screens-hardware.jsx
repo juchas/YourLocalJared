@@ -84,10 +84,19 @@ function ScreenHardware({ onNext, onBack }) {
   const tier = (() => {
     if (error) return FALLBACK_TIER;
     if (!data) return { label: 'probing', chip7: null, chip13: null, chip30: null, chip70: null, msg: '' };
+
+    // CUDA: tier off VRAM. Q4 model sizes used as the budget:
+    // 7B≈5GB, 13B≈8GB, 30B≈20GB, 70B Q3≈30GB / Q4≈40GB. Add headroom for KV cache.
+    const vramGb = data.cuda_available ? Number(data.gpu?.vram_gb) : 0;
+    if (vramGb >= 30) return { label: 'high', chip7: true, chip13: true, chip30: true, chip70: 'slow', msg: `${vramGb} GB VRAM — 7B–30B run fully on GPU; 70B (Q3) usable but slow.` };
+    if (vramGb >= 20) return { label: 'capable+', chip7: true, chip13: true, chip30: true, chip70: false, msg: `${vramGb} GB VRAM — 7B–30B run on GPU; 70B too large.` };
+    if (vramGb >= 12) return { label: 'capable', chip7: true, chip13: true, chip30: 'slow', chip70: false, msg: `${vramGb} GB VRAM — 7B–13B comfortable; 30B with partial offload.` };
+    if (vramGb >= 8) return { label: 'modest+', chip7: true, chip13: 'slow', chip30: false, chip70: false, msg: `${vramGb} GB VRAM — 7B fast; 13B will be slow.` };
+    if (vramGb >= 6) return { label: 'modest', chip7: true, chip13: false, chip30: false, chip70: false, msg: `${vramGb} GB VRAM — 7B (Q4) fits on GPU.` };
+
+    // MPS / CPU: budget against free system RAM (unified memory or full CPU inference).
     const totalGb = Number(data.ram.total_gb);
     const availableGb = Number(data.ram.available_gb);
-    // Budget against what's actually free so we don't suggest models that
-    // will OOM under real memory pressure.
     const gb = Number.isFinite(totalGb)
       ? (Number.isFinite(availableGb) ? Math.min(totalGb, availableGb) : totalGb)
       : availableGb;
@@ -109,7 +118,7 @@ function ScreenHardware({ onNext, onBack }) {
   const rows = data ? [
     { icon: 'cpu',    label: 'chip',     value: data.chip,                                meta: `${data.cpu.cores_physical}p / ${data.cpu.cores_logical}l cores`, tone: 'ok' },
     { icon: 'memory', label: 'memory',   value: `${data.ram.total_gb} GB`,                meta: `${data.ram.available_gb} GB available`,                          tone: 'ok' },
-    { icon: 'zap',    label: 'gpu',      value: data.gpu.name,                            meta: data.cuda_available ? 'cuda' : data.mps_available ? 'metal · unified memory' : 'cpu only', tone: data.cuda_available || data.mps_available ? 'ok' : 'warn' },
+    { icon: 'zap',    label: 'gpu',      value: data.gpu.name,                            meta: data.cuda_available ? `${data.gpu.vram_gb} GB VRAM · cuda` : data.mps_available ? 'metal · unified memory' : 'cpu only', tone: data.cuda_available || data.mps_available ? 'ok' : 'warn' },
     { icon: 'hdd',    label: 'storage',  value: `${data.disk.free_gb} GB free`,           meta: `of ${data.disk.total_gb} GB`,                                    tone: data.disk.free_gb > 20 ? 'ok' : 'warn' },
     { icon: 'terminal', label: 'python', value: data.python.version,                      meta: 'interpreter ready',                                              tone: 'ok' },
     { icon: 'zap',    label: 'os',       value: data.os.pretty,                           meta: data.os.machine,                                                  tone: 'ok' },

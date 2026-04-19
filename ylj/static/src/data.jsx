@@ -60,19 +60,21 @@ function computeFileTypeCounts(folders, fileTypes) {
 }
 
 const LLMS = [
-  { id: 'llama3.1:8b',    name: 'Llama 3.1',         size: '8B',  sizeGB: 4.7, ram: 8,  gated: true,  desc: 'meta · general, multilingual', rec: false },
-  { id: 'qwen2.5:7b',     name: 'Qwen 2.5',          size: '7B',  sizeGB: 4.4, ram: 8,  gated: false, desc: 'alibaba · strong at code + reasoning', rec: true },
-  { id: 'mistral:7b',     name: 'Mistral',           size: '7B',  sizeGB: 4.1, ram: 8,  gated: true,  desc: 'mistral · fast, accurate', rec: false },
-  { id: 'phi3.5:mini',    name: 'Phi 3.5 Mini',      size: '3.8B',sizeGB: 2.2, ram: 6,  gated: false, desc: 'microsoft · small, punches up', rec: false },
-  { id: 'gemma2:9b',      name: 'Gemma 2',           size: '9B',  sizeGB: 5.4, ram: 12, gated: false, desc: 'google · balanced reasoner', rec: false },
-  { id: 'llama3.1:70b',   name: 'Llama 3.1',         size: '70B', sizeGB: 40,  ram: 64, gated: true,  desc: 'meta · frontier-class, needs beefy hw', rec: false },
+  { id: 'gemma4:e4b',     name: 'Gemma 4 E4B',       size: '4B',  sizeGB: 9.6, ram: 12, gated: false, desc: 'google · edge model, 128K context', rec: true  },
+  { id: 'gemma4:e2b',     name: 'Gemma 4 E2B',       size: '2B',  sizeGB: 7.2, ram: 10, gated: false, desc: 'google · tiny edge model, 128K context', rec: false },
+  { id: 'qwen2.5:7b',     name: 'Qwen 2.5',          size: '7B',  sizeGB: 4.4, ram: 8,  gated: false, desc: 'alibaba · strong at code + reasoning', rec: false },
+  { id: 'mistral:7b',     name: 'Mistral',           size: '7B',  sizeGB: 4.1, ram: 8,  gated: false, desc: 'mistral · fast, accurate', rec: false },
+  { id: 'phi4:14b',       name: 'Phi 4',             size: '14B', sizeGB: 9.0, ram: 12, gated: false, desc: 'microsoft · reasoning specialist', rec: false },
+  { id: 'gemma4:26b',     name: 'Gemma 4 26B',       size: '26B', sizeGB: 18,  ram: 24, gated: false, desc: 'google · MoE, fast for its size', rec: false },
+  { id: 'gemma4:31b',     name: 'Gemma 4 31B',       size: '31B', sizeGB: 20,  ram: 28, gated: false, desc: 'google · dense frontier, fits 24GB+ VRAM', rec: false },
+  { id: 'llama3.3:70b',   name: 'Llama 3.3',         size: '70B', sizeGB: 40,  ram: 56, gated: false, desc: 'meta · frontier-class, needs beefy hw', rec: false },
 ];
 
 const EMBEDDERS = [
-  { id: 'nomic-embed',     name: 'nomic-embed-text',  dims: 768,  sizeGB: 0.27, desc: 'nomic · best tradeoff',     rec: true  },
-  { id: 'mxbai-embed',     name: 'mxbai-embed-large', dims: 1024, sizeGB: 0.67, desc: 'mixedbread · highest recall', rec: false },
-  { id: 'bge-small',       name: 'bge-small-en',      dims: 384,  sizeGB: 0.13, desc: 'baai · tiny, fast',         rec: false },
-  { id: 'all-minilm',      name: 'all-MiniLM-L6',     dims: 384,  sizeGB: 0.09, desc: 'sbert · classic, tiny',     rec: false },
+  { id: 'nomic-embed', hfId: 'nomic-ai/nomic-embed-text-v1.5',         name: 'nomic-embed-text',  dims: 768,  sizeGB: 0.27, desc: 'nomic · best tradeoff',       rec: false },
+  { id: 'mxbai-embed', hfId: 'mixedbread-ai/mxbai-embed-large-v1',     name: 'mxbai-embed-large', dims: 1024, sizeGB: 0.67, desc: 'mixedbread · highest recall', rec: false },
+  { id: 'bge-small',   hfId: 'BAAI/bge-small-en-v1.5',                 name: 'bge-small-en',      dims: 384,  sizeGB: 0.13, desc: 'baai · tiny, fast',           rec: true  },
+  { id: 'all-minilm',  hfId: 'sentence-transformers/all-MiniLM-L6-v2', name: 'all-MiniLM-L6',     dims: 384,  sizeGB: 0.09, desc: 'sbert · classic, tiny',       rec: false },
 ];
 
 Object.assign(window, { HARDWARE, FOLDERS, IGNORES, FILETYPES, LLMS, EMBEDDERS, computeFileTypeCounts });

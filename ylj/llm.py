@@ -56,7 +56,7 @@ def generate(question: str, context_chunks: list[dict], model: str | None = None
     url = f"{OLLAMA_HOST.rstrip('/')}/api/chat"
 
     try:
-        with httpx.Client(timeout=120) as client:
+        with httpx.Client(timeout=300) as client:
             response = client.post(url, json=payload)
     except httpx.ConnectError as e:
         raise RuntimeError(
