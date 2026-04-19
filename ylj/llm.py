@@ -35,15 +35,16 @@ def _format_context(context_chunks: list[dict]) -> str:
     )
 
 
-def generate(question: str, context_chunks: list[dict]) -> str:
+def generate(question: str, context_chunks: list[dict], model: str | None = None) -> str:
     """Generate a response using retrieved context via Ollama."""
+    resolved_model = model or LLM_MODEL
     prompt = RAG_PROMPT_TEMPLATE.format(
         context=_format_context(context_chunks),
         question=question,
     )
 
     payload = {
-        "model": LLM_MODEL,
+        "model": resolved_model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "options": {
@@ -67,7 +68,7 @@ def generate(question: str, context_chunks: list[dict]) -> str:
 
     if response.status_code == 404:
         raise RuntimeError(
-            f"Model '{LLM_MODEL}' not pulled. Run: ollama pull {LLM_MODEL}"
+            f"Model '{resolved_model}' not pulled. Run: ollama pull {resolved_model}"
         )
     if response.status_code >= 400:
         raise RuntimeError(

@@ -205,6 +205,7 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[Message]
     model: str | None = None
+    k: int | None = None
 
 
 def _source_id(file: str, page: int | None) -> str:
@@ -218,8 +219,9 @@ def chat(request: ChatRequest):
     if not user_messages:
         raise HTTPException(status_code=400, detail="no user message")
 
+    model = request.model or LLM_MODEL
     try:
-        result = query(user_messages[-1].content)
+        result = query(user_messages[-1].content, top_k=request.k, model=model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -236,7 +238,7 @@ def chat(request: ChatRequest):
     return {
         "answer": result.get("answer", ""),
         "sources": sources,
-        "model": LLM_MODEL,
+        "model": model,
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
 

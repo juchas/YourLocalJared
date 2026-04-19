@@ -150,7 +150,7 @@ function App() {
       const r = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelId, messages: wire }),
+        body: JSON.stringify({ model: modelId, messages: wire, scopeId, k }),
         signal: controller.signal,
       });
       if (!r.ok) {
@@ -193,8 +193,8 @@ function App() {
         }
       }, 16);
     } catch (e) {
-      if (controller.signal.aborted || e?.name === 'AbortError') return;
       if (thinkTimerRef.current) { clearTimeout(thinkTimerRef.current); thinkTimerRef.current = null; }
+      if (controller.signal.aborted || e?.name === 'AbortError') return;
       const message = `⚠︎ chat failed: ${e.message || e}`;
       const botMsg = {
         id: 'b' + Date.now(), role: 'assistant', text: message, ts: Date.now(),

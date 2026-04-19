@@ -14,11 +14,11 @@ from ylj.server import ChatRequest, Message
 
 
 def test_chat_returns_answer_and_sources(monkeypatch):
-    monkeypatch.setattr(server, "query", lambda q: {
+    monkeypatch.setattr(server, "query", lambda q, **kw: {
         "answer": "hi there",
         "sources": [
             {"source": "notes.md", "page": 2, "score": 0.9},
-            {"source": "journal.md", "page": None, "score": 0.7},
+            {"source": "notes.md", "page": 3, "score": 0.7},
         ],
     })
 
@@ -51,7 +51,7 @@ def test_chat_400_on_no_user_message(monkeypatch):
 
 
 def test_chat_500_on_rag_error(monkeypatch):
-    def boom(_q):
+    def boom(_q, **kw):
         raise RuntimeError("Ollama daemon not reachable")
 
     monkeypatch.setattr(server, "query", boom)
@@ -66,7 +66,7 @@ def test_chat_500_on_rag_error(monkeypatch):
 
 def test_chat_ignores_unknown_sources_keys(monkeypatch):
     # rag.query is free to add fields; we only read the ones we expose.
-    monkeypatch.setattr(server, "query", lambda q: {
+    monkeypatch.setattr(server, "query", lambda q, **kw: {
         "answer": "ok",
         "sources": [
             {"source": "a.md", "page": 1, "score": 0.5, "extra_internal": "ignore me"},

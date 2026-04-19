@@ -74,10 +74,14 @@ ok "Documents directory ready"
 info "Checking for Ollama..."
 if command -v ollama &>/dev/null; then
     ok "ollama is installed ($(ollama --version 2>/dev/null | head -1))"
-    if curl -s --max-time 2 http://localhost:11434/api/version &>/dev/null; then
-        ok "ollama daemon is running"
+    if command -v curl &>/dev/null; then
+        if curl -s --max-time 2 http://localhost:11434/api/version &>/dev/null; then
+            ok "ollama daemon is running"
+        else
+            warn "ollama is installed but the daemon isn't running. Start it with: ollama serve"
+        fi
     else
-        warn "ollama is installed but the daemon isn't running. Start it with: ollama serve"
+        warn "curl not found; skipping ollama daemon readiness check"
     fi
 else
     warn "ollama not found. Install from https://ollama.com — the onboarding wizard will pull the model after."
