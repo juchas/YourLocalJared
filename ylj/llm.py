@@ -74,10 +74,25 @@ def generate(question: str, context_chunks: list[dict]) -> str:
             f"Ollama returned HTTP {response.status_code}: {response.text[:200]}"
         )
 
-    data = response.json()
-    return data.get("message", {}).get("content", "").strip()
+    try:
+        data = response.json()
+    except ValueError as e:
+        raise RuntimeError(
+            f"Ollama returned invalid JSON: {response.text[:200]}"
+        ) from e
 
+    if not isinstance(data, dict):
+        raise RuntimeError("Ollama returned an unexpected response format.")
 
+    message = data.get("message")
+    if not isinstance(message, dict):
+        raise RuntimeError("Ollama response missing 'message' object.")
+
+    content = message.get("content")
+    if not isinstance(content, str):
+        raise RuntimeError("Ollama response missing 'message.content' string.")
+
+    return content.strip()
 def status() -> dict:
     """Check Ollama daemon reachability and list pulled models.
 
