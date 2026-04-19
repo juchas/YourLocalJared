@@ -177,3 +177,44 @@ Stage 5 is the critical dependency — it establishes the SSE pattern reused by 
 2. Tick boxes as each bullet lands
 3. When every box in a stage is ticked, mark the stage header with ✅ (e.g. `### Stage 0 — ... ✅`)
 4. Cross-cutting questions at the top should be answered before they're needed by a stage
+
+---
+
+## Stage ∞ — Ship as an Electron desktop app (optional)
+
+Once the web product is feature-complete, wrap it as a native desktop app so
+users get an icon in their dock and don't have to remember `python start.py`.
+
+**Why Electron over Tauri (for this project):**
+
+- The frontend is already React + plain HTML/CSS — no Rust required; Node is enough.
+- Electron bundles its own Chromium, so the UI renders identically on macOS,
+  Windows, and Linux. Tauri uses the OS webview and Linux's `webkit2gtk` lags
+  Chromium by years.
+- Electron's ecosystem for desktop concerns (auto-updaters, crash reporters,
+  code signing, Mac App Store distribution) is mature; Tauri 2.0 is closing
+  the gap but still has more edge cases.
+- Bundle size isn't a blocker — we're already shipping ~2 GB of model weights.
+
+**Scope sketch:**
+
+- [ ] Add an `electron/` directory with `main.js` that launches the bundled
+      FastAPI server as a child process and loads `http://localhost:8000/setup`
+      (or `/chat` after onboarding) into a `BrowserWindow`.
+- [ ] Package Python + deps via `pyinstaller` or ship a portable venv; spawn
+      it from Electron on app start.
+- [ ] Ollama stays a user-installed system daemon (don't bundle — licensing
+      + size). The existing `/api/setup/ollama-status` check already handles
+      "not installed / not running" cleanly.
+- [ ] Use `electron-builder` to produce `.dmg` (macOS), `.exe` (Windows),
+      and `.AppImage`/`.deb` (Linux). Sign for macOS notarization + Windows
+      Authenticode.
+- [ ] Mac App Store target via `electron-builder --mac mas` if we want
+      first-party distribution (requires sandboxing review; the Ollama
+      daemon requirement may conflict with sandbox expectations — evaluate
+      before committing).
+- [ ] System tray + quit handler; auto-start option.
+- [ ] Auto-updater wired to GitHub Releases (`electron-updater`).
+
+**Deferred — pick up only after web product is stable.** The web UI is the
+source of truth; Electron is a packaging concern, not a rewrite.
