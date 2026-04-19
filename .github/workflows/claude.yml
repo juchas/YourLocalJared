@@ -32,7 +32,11 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          model: claude-opus-4-7
+          # No `model:` pin — fall back to the action's default (latest
+          # Sonnet). Pinning to `claude-opus-4-7` caused the action to
+          # fail silently (eyes reaction, no response) because the ID
+          # wasn't recognised by the action's model catalog at the time.
+          # Re-add once Opus 4.7 is officially supported.
           prompt: |
             When the user asks you to review a pull request (e.g. "@claude
             review this PR"), submit a formal GitHub review using the
