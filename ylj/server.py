@@ -71,7 +71,7 @@ def probe(request: Request):
     try:
         is_loopback = bool(host) and ip_address(host).is_loopback
     except ValueError:
-        is_loopback = host == "localhost"
+        is_loopback = host in {"localhost", "127.0.0.1", "::1"}
 
     if not is_loopback:
         raise HTTPException(status_code=403, detail="probe endpoint is localhost only")
