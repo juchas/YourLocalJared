@@ -68,8 +68,10 @@ def system_info():
 def probe(request: Request):
     """Detailed hardware probe for the onboarding wizard (localhost only)."""
     host = request.client.host if request.client else None
+    is_loopback = False
     try:
-        is_loopback = bool(host) and ip_address(host).is_loopback
+        if host is not None:
+            is_loopback = ip_address(host).is_loopback
     except ValueError:
         is_loopback = host in {"localhost", "127.0.0.1", "::1"}
 
