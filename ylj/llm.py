@@ -106,7 +106,18 @@ def status() -> dict:
         with httpx.Client(timeout=2) as client:
             version = client.get(f"{base}/api/version").json()
             tags = client.get(f"{base}/api/tags").json()
-        models = [m.get("name") for m in tags.get("models", []) if m.get("name")]
+        if not isinstance(version, dict):
+            version = {}
+        if not isinstance(tags, dict):
+            tags = {}
+        raw_models = tags.get("models", [])
+        if not isinstance(raw_models, list):
+            raw_models = []
+        models = [
+            m.get("name")
+            for m in raw_models
+            if isinstance(m, dict) and m.get("name")
+        ]
         return {"running": True, "version": version.get("version"), "models": models}
     except Exception:
         return {"running": False, "version": None, "models": []}

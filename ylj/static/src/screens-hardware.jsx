@@ -129,6 +129,7 @@ function ScreenHardware({ onNext, onBack }) {
           </ColHeader>
           {rows.map((r, i) => {
             const probed = data && progress > i;
+            const failed = !data && error;
             return (
               <Row key={r.label} accent={probed ? 'var(--accent)' : 'var(--border-hi)'}>
                 <Icon name={r.icon} size={14} style={{ color: probed ? 'var(--accent-hi)' : 'var(--text-dimmer)' }} />
@@ -137,17 +138,19 @@ function ScreenHardware({ onNext, onBack }) {
                 </span>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                   <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {probed ? r.value : '…'}
+                    {probed ? r.value : failed ? 'unknown' : '…'}
                   </span>
                   <span style={{ fontSize: 10, color: 'var(--text-dimmer)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {probed ? r.meta : 'probing'}
+                    {probed ? r.meta : failed ? 'probe failed' : 'probing'}
                   </span>
                 </div>
-                {probed ? <Chip tone={r.tone}>{r.tone === 'warn' ? 'check' : 'ok'}</Chip> : <span style={{
-                  width: 10, height: 10, borderRadius: '50%',
-                  background: 'var(--border)',
-                  animation: 'pulse 1s ease-in-out infinite',
-                }} />}
+                {probed ? <Chip tone={r.tone}>{r.tone === 'warn' ? 'check' : 'ok'}</Chip>
+                  : failed ? <Chip tone="warn">n/a</Chip>
+                  : <span style={{
+                      width: 10, height: 10, borderRadius: '50%',
+                      background: 'var(--border)',
+                      animation: 'pulse 1s ease-in-out infinite',
+                    }} />}
               </Row>
             );
           })}
