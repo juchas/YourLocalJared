@@ -8,6 +8,7 @@ function ScreenHardware({ onNext, onBack }) {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     const t0 = performance.now();
     const stamp = () => ((performance.now() - t0) / 1000).toFixed(2);
     const push = (msg, fg = 'var(--text-dim)') =>
@@ -21,7 +22,7 @@ function ScreenHardware({ onNext, onBack }) {
 
     push('starting probe…', 'var(--text-dimmer)');
 
-    fetch('/api/setup/probe')
+    fetch('/api/setup/probe', { signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -30,9 +31,7 @@ function ScreenHardware({ onNext, onBack }) {
         if (cancelled) return;
         setData(d);
         const steps = [
-          { msg: `os: ${d.os.pretty} (${d.os.machine})`, fg: 'var(--text-dim)' },
-          { msg: `chip: ${d.chip}`, fg: 'var(--accent-hi)' },
-          { msg: `cpu cores: ${d.cpu.cores_physical}p / ${d.cpu.cores_logical}l`, fg: 'var(--text-dim)' },
+          { msg: `chip: ${d.chip} · ${d.cpu.cores_physical}p / ${d.cpu.cores_logical}l`, fg: 'var(--accent-hi)' },
           { msg: `memory: ${d.ram.total_gb} GB total · ${d.ram.available_gb} GB available`, fg: 'var(--text-dim)' },
           {
             msg: d.cuda_available
@@ -44,6 +43,7 @@ function ScreenHardware({ onNext, onBack }) {
           },
           { msg: `disk: ${d.disk.free_gb} GB free / ${d.disk.total_gb} GB`, fg: 'var(--text-dim)' },
           { msg: `python ${d.python.version} · ready`, fg: 'var(--text-dim)' },
+          { msg: `os: ${d.os.pretty} (${d.os.machine})`, fg: 'var(--text-dim)' },
           { msg: 'probe complete.', fg: 'var(--accent-hi)' },
         ];
         let i = 0;
@@ -59,16 +59,30 @@ function ScreenHardware({ onNext, onBack }) {
         }, 180);
       })
       .catch((e) => {
+        if (e?.name === 'AbortError') return;
         if (cancelled) return;
         setError(String(e));
         push(`probe failed: ${e}`, 'var(--danger, #e66)');
         setDone(true);
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [nonce]);
 
   const tier = (() => {
+    if (error) {
+      return {
+        label: 'conservative',
+        chip7: 'slow',
+        chip13: false,
+        chip30: false,
+        chip70: false,
+        msg: 'probe failed — using conservative defaults.',
+      };
+    }
     if (!data) return { label: 'probing', chip7: null, chip13: null, chip30: null, chip70: null, msg: '' };
     const totalGb = Number(data.ram.total_gb);
     const availableGb = Number(data.ram.available_gb);
@@ -184,8 +198,8 @@ function ScreenHardware({ onNext, onBack }) {
         <div style={{ flex: 1 }} />
         <StepNav
           onBack={onBack}
-          onNext={error ? reprobe : onNext}
-          nextLabel={done && !error ? 'pick folders' : error ? 'retry' : 'probing…'}
+          onNext={onNext}
+          nextLabel={done ? 'pick folders' : 'probing…'}
           nextDisabled={!done}
         />
       </div>
