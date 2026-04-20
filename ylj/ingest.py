@@ -58,12 +58,18 @@ def ingest_stream(
     of how many GB of documents the user pointed us at and `embed`/`store`
     progress events reflect real work rather than a single end-of-run flush.
 
+    Per-file parse errors are isolated: one unparseable file (e.g. an
+    encrypted PDF, a locked XLSX) yields a ``skip`` event and the run
+    continues. Only errors in the pipeline itself (embedding model,
+    vector store, enumeration) terminate with an ``error`` event.
+
     Event shapes:
         {"phase": "scan",  "total_files": int}
         {"phase": "parse", "file": str, "chunks": int, "ms": int, "files_done": int}
+        {"phase": "skip",  "file": str, "reason": str, "files_done": int}
         {"phase": "embed", "chunks_done": int}
         {"phase": "store", "chunks_done": int}
-        {"phase": "done",  "files": int, "chunks": int}
+        {"phase": "done",  "files": int, "chunks": int, "failed": int}
         {"phase": "error", "message": str}
     """
     try:
@@ -75,13 +81,14 @@ def ingest_stream(
         yield {"phase": "scan", "total_files": len(files)}
 
         if not files:
-            yield {"phase": "done", "files": 0, "chunks": 0}
+            yield {"phase": "done", "files": 0, "chunks": 0, "failed": 0}
             return
 
         model = get_embedding_model()
 
         buffer: list = []
         total_chunks = 0
+        failed = 0
 
         def flush():
             """Embed + upsert whatever's in `buffer`, yielding phase events."""
@@ -98,8 +105,24 @@ def ingest_stream(
 
         for idx, path in enumerate(files, start=1):
             t0 = time.perf_counter()
-            raw = parse_document(path)
-            chunked = split_chunks(raw)
+            # Isolate parse failures so one bad file (encrypted PDF,
+            # locked spreadsheet, corrupted archive) doesn't take the
+            # rest of the corpus down with it. Anything raised below
+            # the parser boundary — file I/O, library bugs — is fair
+            # game to surface as a skip rather than a pipeline error.
+            try:
+                raw = parse_document(path)
+                chunked = split_chunks(raw)
+            except Exception as e:
+                failed += 1
+                yield {
+                    "phase": "skip",
+                    "file": str(path),
+                    "reason": f"{type(e).__name__}: {e}",
+                    "files_done": idx,
+                }
+                continue
+
             buffer.extend(chunked)
             total_chunks += len(chunked)
             yield {
@@ -122,7 +145,12 @@ def ingest_stream(
         # Flush the trailing partial batch.
         yield from flush()
 
-        yield {"phase": "done", "files": len(files), "chunks": total_chunks}
+        yield {
+            "phase": "done",
+            "files": len(files) - failed,
+            "chunks": total_chunks,
+            "failed": failed,
+        }
     except Exception as e:
         yield {"phase": "error", "message": str(e)}
 
@@ -137,12 +165,16 @@ def ingest(directory: Path) -> None:
             print(f"Found {ev['total_files']} files to ingest.")
         elif phase == "parse":
             print(f"  [{ev['files_done']}] {ev['file']} → {ev['chunks']} chunks ({ev['ms']}ms)")
+        elif phase == "skip":
+            print(f"  [{ev['files_done']}] skipped {ev['file']}: {ev['reason']}")
         elif phase == "embed" and last_phase != "embed":
             print(f"Embedding chunks (batch starts at {ev.get('chunks_done', 0)})...")
         elif phase == "store" and last_phase != "store":
             print("Storing chunks...")
         elif phase == "done":
-            print(f"Done: {ev.get('files', 0)} files, {ev.get('chunks', 0)} chunks.")
+            failed = ev.get("failed", 0)
+            suffix = f", {failed} failed" if failed else ""
+            print(f"Done: {ev.get('files', 0)} files, {ev.get('chunks', 0)} chunks{suffix}.")
         elif phase == "error":
             print(f"Error: {ev['message']}")
             errored = True

@@ -20,6 +20,7 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
   const [totalFiles, setTotalFiles] = useState(Math.max(1, Math.floor(estimatedFiles)));
   const [filesProcessed, setFilesProcessed] = useState(0);
   const [chunks, setChunks] = useState(0);
+  const [failed, setFailed] = useState(0);
   const [done, setDone] = useState(false);
   const [error, setError] = useState(null);
   const [log, setLog] = useState([]);
@@ -43,6 +44,7 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
     setPhaseIdx(0);
     setFilesProcessed(0);
     setChunks(0);
+    setFailed(0);
     setDone(false);
     setError(null);
     setLog([]);
@@ -63,7 +65,24 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
             ? ev.file.split(/[\\/]/).slice(-2).join('/')
             : '(unknown)';
           setLog(l => [{
-            t: stamp(), file: displayFile, chunks: ev.chunks | 0, ms: ev.ms | 0,
+            t: stamp(), file: displayFile, chunks: ev.chunks | 0, ms: ev.ms | 0, kind: 'parse',
+          }, ...l].slice(0, 40));
+          break;
+        }
+        case 'skip': {
+          // A single bad file (encrypted PDF, locked workbook, …) is
+          // logged and counted but does NOT block the rest of the run.
+          setPhaseIdx(i => Math.max(i, phaseIndex.parse));
+          if (typeof ev.files_done === 'number') setFilesProcessed(ev.files_done);
+          setFailed(f => f + 1);
+          const displayFile = typeof ev.file === 'string'
+            ? ev.file.split(/[\\/]/).slice(-2).join('/')
+            : '(unknown)';
+          setLog(l => [{
+            t: stamp(),
+            file: displayFile,
+            reason: ev.reason || 'parse failed',
+            chunks: 0, ms: 0, kind: 'skip',
           }, ...l].slice(0, 40));
           break;
         }
@@ -75,8 +94,14 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           break;
         case 'done':
           setPhaseIdx(phaseIndex.store);
-          if (typeof ev.files === 'number') setFilesProcessed(ev.files);
+          // `ev.files` is the successful-processed count; bumping
+          // filesProcessed to (files + failed) keeps the progress
+          // ring in sync with what the user watched scroll past.
+          if (typeof ev.files === 'number') {
+            setFilesProcessed(ev.files + (ev.failed | 0));
+          }
           if (typeof ev.chunks === 'number') setChunks(ev.chunks);
+          if (typeof ev.failed === 'number') setFailed(ev.failed);
           setDone(true);
           break;
         case 'error':
@@ -197,7 +222,7 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           </div>
 
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--border)', border: '1px solid var(--border)', marginBottom: 18 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--border)', border: '1px solid var(--border)', marginBottom: failed > 0 ? 10 : 18 }}>
               {[
                 ['files', `${filesProcessed.toLocaleString()} / ${totalFiles.toLocaleString()}`],
                 ['chunks', chunks.toLocaleString()],
@@ -210,6 +235,11 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
                 </div>
               ))}
             </div>
+            {failed > 0 && (
+              <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--warn, #c97d17)', marginBottom: 14, fontVariantNumeric: 'tabular-nums' }}>
+                {failed.toLocaleString()} unparseable — see log
+              </div>
+            )}
             <div style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-dimmer)', marginBottom: 8 }}>pipeline</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {phases.map((ph, i) => {
@@ -265,17 +295,30 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
               waiting for parse events…
             </div>
           )}
-          {log.map((l, i) => (
-            <Row key={i} accent="var(--accent)" style={{ animation: 'slideIn 0.2s' }}>
-              <span style={{ fontSize: 10, color: 'var(--text-faintest)', width: 36, fontVariantNumeric: 'tabular-nums' }}>{l.t}</span>
-              <Icon name="check" size={10} stroke={2.5} style={{ color: 'var(--accent-hi)' }} />
-              <span style={{ flex: 1, fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {l.file}
-              </span>
-              <span style={{ width: 70, textAlign: 'right', fontSize: 11, color: 'var(--accent-hi)', fontVariantNumeric: 'tabular-nums' }}>+{l.chunks}</span>
-              <span style={{ width: 60, textAlign: 'right', fontSize: 11, color: 'var(--text-dimmer)', fontVariantNumeric: 'tabular-nums' }}>{l.ms}</span>
-            </Row>
-          ))}
+          {log.map((l, i) => {
+            const isSkip = l.kind === 'skip';
+            return (
+              <Row key={i} accent={isSkip ? 'var(--warn, #c97d17)' : 'var(--accent)'} style={{ animation: 'slideIn 0.2s' }}
+                title={isSkip ? l.reason : undefined}>
+                <span style={{ fontSize: 10, color: 'var(--text-faintest)', width: 36, fontVariantNumeric: 'tabular-nums' }}>{l.t}</span>
+                <Icon name={isSkip ? 'x' : 'check'} size={10} stroke={2.5}
+                  style={{ color: isSkip ? 'var(--warn, #c97d17)' : 'var(--accent-hi)' }} />
+                <span style={{
+                  flex: 1, fontSize: 11,
+                  color: isSkip ? 'var(--text-dim)' : 'var(--text)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {l.file}{isSkip && <span style={{ color: 'var(--warn, #c97d17)', marginLeft: 8 }}>· {l.reason}</span>}
+                </span>
+                <span style={{ width: 70, textAlign: 'right', fontSize: 11, color: 'var(--accent-hi)', fontVariantNumeric: 'tabular-nums' }}>
+                  {isSkip ? '' : `+${l.chunks}`}
+                </span>
+                <span style={{ width: 60, textAlign: 'right', fontSize: 11, color: 'var(--text-dimmer)', fontVariantNumeric: 'tabular-nums' }}>
+                  {isSkip ? '' : l.ms}
+                </span>
+              </Row>
+            );
+          })}
         </div>
       </div>
     </div>
