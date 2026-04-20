@@ -96,18 +96,31 @@ def system_info():
 
 
 def _is_loopback_request(request: Request) -> bool:
-    """Both transport peer and request host must be loopback. Guards endpoints
-    that would be dangerous to expose on the LAN (path-accepting, long-running)."""
-    def ok(host: str | None) -> bool:
+    """Guards endpoints that would be dangerous to expose on the LAN
+    (path-accepting, long-running). The peer IP is the real security
+    barrier — a non-loopback peer means the request crossed the network.
+    The Host header check is just DNS-rebinding defence-in-depth, so it
+    allows the names users actually type into the address bar, including
+    ``0.0.0.0`` (what our startup banner prints)."""
+    def peer_ok(host: str | None) -> bool:
         if host is None:
             return False
         try:
             return ip_address(host).is_loopback
         except ValueError:
-            return host in {"localhost", "127.0.0.1", "::1"}
+            return False
+
+    def host_header_ok(host: str | None) -> bool:
+        if host is None:
+            return False
+        try:
+            addr = ip_address(host)
+            return addr.is_loopback or addr == ip_address("0.0.0.0")
+        except ValueError:
+            return host in {"localhost"}
 
     client_host = request.client.host if request.client else None
-    return ok(client_host) and ok(request.url.hostname)
+    return peer_ok(client_host) and host_header_ok(request.url.hostname)
 
 
 @app.get("/api/setup/probe")
