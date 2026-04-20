@@ -24,8 +24,8 @@ def test_chat_returns_answer_and_sources(monkeypatch):
     monkeypatch.setattr(server, "query", lambda q, **kw: {
         "answer": "hi there",
         "sources": [
-            {"source": "notes.md", "page": 2, "score": 0.9},
-            {"source": "notes.md", "page": 3, "score": 0.7},
+            {"source": "notes.md", "page": 2, "score": 0.9, "text": "alpha body"},
+            {"source": "notes.md", "page": 3, "score": 0.7, "text": "bravo body"},
         ],
     })
 
@@ -40,11 +40,43 @@ def test_chat_returns_answer_and_sources(monkeypatch):
     assert first["file"] == "notes.md"
     assert first["page"] == 2
     assert first["score"] == 0.9
-    assert first["snippet"] is None
+    assert first["snippet"] == "alpha body"
     assert isinstance(first["id"], str) and len(first["id"]) == 8
 
     # Same file at different pages should get different ids.
     assert out["sources"][1]["id"] != first["id"]
+    assert out["sources"][1]["snippet"] == "bravo body"
+
+
+def test_chat_snippet_truncated_to_preview_size(monkeypatch):
+    """The chat payload can carry many sources; each snippet is capped to
+    keep the response small. The model already saw the full chunk."""
+    body = "x" * 5000
+    monkeypatch.setattr(server, "query", lambda q, **kw: {
+        "answer": "hi",
+        "sources": [{"source": "a.md", "page": 1, "score": 0.5, "text": body}],
+    })
+
+    req = ChatRequest(messages=[Message(role="user", content="what?")])
+    out = server.chat(req)
+
+    snippet = out["sources"][0]["snippet"]
+    assert snippet is not None
+    assert len(snippet) <= server.SNIPPET_MAX_CHARS
+    assert snippet == "x" * server.SNIPPET_MAX_CHARS
+
+
+def test_chat_missing_text_falls_back_to_null_snippet(monkeypatch):
+    """Older source dicts without `text` must not crash the decorator."""
+    monkeypatch.setattr(server, "query", lambda q, **kw: {
+        "answer": "hi",
+        "sources": [{"source": "a.md", "page": 1, "score": 0.5}],
+    })
+
+    req = ChatRequest(messages=[Message(role="user", content="what?")])
+    out = server.chat(req)
+
+    assert out["sources"][0]["snippet"] is None
 
 
 def test_chat_400_on_no_user_message(monkeypatch):

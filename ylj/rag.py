@@ -15,7 +15,15 @@ _EMPTY_INDEX_ANSWER = (
 
 
 def _to_source_dict(r: dict) -> dict:
-    return {"source": r["source"], "page": r.get("page"), "score": r["score"]}
+    # `text` is carried through so the server can surface a snippet to
+    # the UI. The chat endpoint truncates it to a preview-sized string
+    # before sending it to the browser.
+    return {
+        "source": r["source"],
+        "page": r.get("page"),
+        "score": r["score"],
+        "text": r.get("text", ""),
+    }
 
 
 def query(question: str, top_k: int | None = None, model: str | None = None) -> dict:

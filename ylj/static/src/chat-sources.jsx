@@ -1,7 +1,15 @@
 // Right-side sources drawer
 function SourcesPanel({ sources, onClose, focusIdx }) {
   const [sel, setSel] = useState(focusIdx || 0);
-  useEffect(() => { setSel(focusIdx || 0); }, [focusIdx, sources]);
+  // `flashKey` bumps every time the panel is (re-)focused on a citation
+  // click, even when the selection index hasn't changed — so the row
+  // flashes visibly and the content below refreshes. `sources` is kept
+  // in the deps so opening a different message's sources also flashes.
+  const [flashKey, setFlashKey] = useState(0);
+  useEffect(() => {
+    setSel(focusIdx || 0);
+    setFlashKey(k => k + 1);
+  }, [focusIdx, sources]);
 
   if (!sources || sources.length === 0) {
     return (
@@ -15,7 +23,6 @@ function SourcesPanel({ sources, onClose, focusIdx }) {
   }
 
   const s = sources[sel];
-  const context = buildContext(s);
 
   return (
     <div style={{ width: 340, borderLeft: '1px solid var(--border)', background: 'var(--bg-alt)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
@@ -29,7 +36,13 @@ function SourcesPanel({ sources, onClose, focusIdx }) {
         </ColHeader>
         <div style={{ flex: 1, overflow: 'auto' }}>
           {sources.map((src, i) => (
-            <Row key={src.id} selected={sel === i} accent={sel === i ? 'var(--accent)' : 'var(--border-hi)'} onClick={() => setSel(i)}>
+            <Row
+              key={`${src.id}-${sel === i ? flashKey : 0}`}
+              selected={sel === i}
+              accent={sel === i ? 'var(--accent)' : 'var(--border-hi)'}
+              onClick={() => { setSel(i); setFlashKey(k => k + 1); }}
+              style={sel === i ? { animation: 'pulse 0.4s ease-out' } : undefined}
+            >
               <span style={{ fontSize: 10, color: 'var(--text-dimmer)', width: 22, fontVariantNumeric: 'tabular-nums' }}>
                 {String(i+1).padStart(2, '0')}
               </span>
@@ -38,7 +51,9 @@ function SourcesPanel({ sources, onClose, focusIdx }) {
                 <div style={{ fontSize: 11, color: 'var(--text)', fontWeight: sel === i ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {src.file.split('/').pop()}
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--text-dimmer)' }}>{src.line}</div>
+                {src.page != null && (
+                  <div style={{ fontSize: 10, color: 'var(--text-dimmer)' }}>p. {src.page}</div>
+                )}
               </div>
               <span style={{ width: 50, textAlign: 'right', fontSize: 10, color: 'var(--accent-hi)', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
                 {src.score.toFixed(2)}
@@ -54,7 +69,11 @@ function SourcesPanel({ sources, onClose, focusIdx }) {
           {s.file}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, background: 'var(--border)', border: '1px solid var(--border)' }}>
-          {[['line', s.line], ['score', s.score.toFixed(2)], ['chunk', `#${sel+1}`]].map(([l,v])=>(
+          {[
+            ['page', s.page != null ? s.page : '—'],
+            ['score', s.score.toFixed(2)],
+            ['chunk', `#${sel+1}`],
+          ].map(([l,v])=>(
             <div key={l} style={{ background: 'var(--bg)', padding: '8px 10px' }}>
               <div style={{ fontSize: 9, color: 'var(--text-dimmer)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>{l}</div>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{v}</div>
@@ -70,11 +89,15 @@ function SourcesPanel({ sources, onClose, focusIdx }) {
           background: 'var(--bg)', border: '1px solid var(--border)',
           padding: 14, color: 'var(--text-dim)', whiteSpace: 'pre-wrap',
         }}>
-          <span style={{ color: 'var(--text-faintest)' }}>{context.before}</span>
-          <mark style={{ background: 'var(--accent-dim)', color: 'var(--text)', padding: '1px 2px', fontWeight: 500 }}>
-            {s.snippet}
-          </mark>
-          <span style={{ color: 'var(--text-faintest)' }}>{context.after}</span>
+          {s.snippet ? (
+            <mark style={{ background: 'var(--accent-dim)', color: 'var(--text)', padding: '1px 2px', fontWeight: 500 }}>
+              {s.snippet}
+            </mark>
+          ) : (
+            <span style={{ color: 'var(--text-faintest)', fontStyle: 'italic' }}>
+              (no preview available)
+            </span>
+          )}
         </div>
       </div>
 
@@ -96,12 +119,6 @@ function Header({ onClose, count }) {
       <button onClick={onClose} style={{ padding: 4, color: 'var(--text-dim)' }}><Icon name="x" size={13} /></button>
     </div>
   );
-}
-
-function buildContext(s) {
-  const before = '…lorem chunk ipsum dolor sit amet. consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ';
-  const after  = ' ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat…';
-  return { before, after };
 }
 
 window.SourcesPanel = SourcesPanel;
