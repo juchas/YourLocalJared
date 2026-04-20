@@ -52,24 +52,26 @@ def detect_gpu() -> tuple[dict, bool, bool]:
     if cuda:
         try:
             name = torch.cuda.get_device_name(0)
+            vram_gb = round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1)
         except Exception:
             name = "cuda device"
-        return {"name": name, "backend": "cuda"}, cuda, mps
+            vram_gb = 0.0
+        return {"name": name, "backend": "cuda", "vram_gb": vram_gb}, cuda, mps
     if mps:
-        return {"name": "Apple GPU (Metal)", "backend": "mps"}, cuda, mps
-    return {"name": "none", "backend": "cpu"}, cuda, mps
+        return {"name": "Apple GPU (Metal)", "backend": "mps", "vram_gb": 0.0}, cuda, mps
+    return {"name": "none", "backend": "cpu", "vram_gb": 0.0}, cuda, mps
 
 
 def recommend_model(ram_total_gb: float) -> str:
     """Pick a sensible default LLM from available RAM.
 
-    Mirrors the tier buckets rendered in screens-hardware.jsx. The UI's
-    "modest" tier (12-24 GB) still shows a 7B chip as ok, so we pick
-    qwen2.5:7b everywhere above the "limited" threshold.
+    Mirrors the tier buckets rendered in screens-hardware.jsx. Above the
+    limited threshold we default to gemma4:e4b — small enough to run on
+    modest hardware but benefits from any GPU present.
     """
     if ram_total_gb < 12:
-        return "phi3.5:mini"
-    return "qwen2.5:7b"
+        return "gemma4:e2b"
+    return "gemma4:e4b"
 
 
 def probe(disk_path: str | Path | None = None) -> dict:

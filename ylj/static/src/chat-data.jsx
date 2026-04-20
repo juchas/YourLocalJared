@@ -14,7 +14,7 @@ const CONVERSATIONS = [
     messages: [
       { id: 'm1', role: 'user', text: 'what did i decide about the chunking strategy?', ts: mins(8) },
       {
-        id: 'm2', role: 'assistant', ts: mins(7), model: 'qwen2.5:7b',
+        id: 'm2', role: 'assistant', ts: mins(7), model: 'gemma4:e4b',
         text: "based on your notes — you went with a **sliding window**, ~512 tokens per chunk, 50-token overlap, and separate embedding for each chunk.\n\nyou rejected sentence-based chunking because it fragmented code blocks too aggressively. decision is in `notes/ideas/embedding-arch.md` (mar 14) and cross-ref'd in `meetings/2024-03-14.md`.",
         sources: [
           { id: 's1', file: 'notes/ideas/embedding-arch.md',  line: '42-58', snippet: '…decided on 512-token sliding window w/ 50-token overlap. sentence splits were bad for code…', score: 0.91 },
@@ -25,7 +25,7 @@ const CONVERSATIONS = [
       },
       { id: 'm3', role: 'user', text: 'and what about chunk size for code files specifically?', ts: mins(4) },
       {
-        id: 'm4', role: 'assistant', ts: mins(3), model: 'qwen2.5:7b',
+        id: 'm4', role: 'assistant', ts: mins(3), model: 'gemma4:e4b',
         text: "for code you overrode the default — **1024 tokens, no overlap**, split on top-level symbol boundaries (functions, classes). the reasoning was that code has strong local coherence, so splitting mid-function kills retrieval quality.\n\nyou also added a soft rule: files under 400 tokens stay unchunked so the whole file is one embedding.",
         sources: [
           { id: 's4', file: 'notes/ideas/embedding-arch.md', line: '60-75', snippet: '…for code specifically, 1024 tokens w/o overlap, split on AST boundaries (def/class/top-level)…', score: 0.94 },
@@ -80,10 +80,10 @@ const CONVERSATIONS = [
 ];
 
 const MODELS = [
-  { id: 'qwen2.5:7b',  name: 'qwen 2.5',      size: '7B',  speed: 'fast',   rec: true  },
-  { id: 'phi3.5:mini', name: 'phi 3.5',       size: '3.8B',speed: 'fastest', rec: false },
-  { id: 'gemma2:9b',   name: 'gemma 2',       size: '9B',  speed: 'medium', rec: false },
-  { id: 'llama3.1:8b', name: 'llama 3.1',     size: '8B',  speed: 'fast',   rec: false },
+  { id: 'gemma4:e4b',  name: 'gemma 4 e4b',   size: '4B',  speed: 'fast',    rec: true  },
+  { id: 'gemma4:e2b',  name: 'gemma 4 e2b',   size: '2B',  speed: 'fastest', rec: false },
+  { id: 'qwen2.5:7b',  name: 'qwen 2.5',      size: '7B',  speed: 'fast',    rec: false },
+  { id: 'phi4:14b',    name: 'phi 4',         size: '14B', speed: 'medium',  rec: false },
 ];
 
 const SCOPES = [

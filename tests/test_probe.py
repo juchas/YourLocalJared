@@ -11,7 +11,7 @@ def test_probe_shape():
         "cuda_available", "mps_available", "recommended_model",
     }
 
-    assert result["recommended_model"] in {"phi3.5:mini", "qwen2.5:7b"}
+    assert result["recommended_model"] in {"gemma4:e2b", "gemma4:e4b"}
 
     assert isinstance(result["chip"], str) and result["chip"]
 
@@ -38,7 +38,7 @@ def test_probe_shape():
 
 
 def test_recommend_model_uses_ui_breakpoints():
-    assert recommend_model(11.9) == "phi3.5:mini"  # limited
-    assert recommend_model(12.0) == "qwen2.5:7b"  # modest
-    assert recommend_model(24.0) == "qwen2.5:7b"  # capable
-    assert recommend_model(48.0) == "qwen2.5:7b"  # high
+    assert recommend_model(11.9) == "gemma4:e2b"  # limited
+    assert recommend_model(12.0) == "gemma4:e4b"  # modest
+    assert recommend_model(24.0) == "gemma4:e4b"  # capable
+    assert recommend_model(48.0) == "gemma4:e4b"  # high

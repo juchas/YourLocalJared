@@ -22,7 +22,7 @@ EMBEDDING_DIMENSION = int(os.getenv("YLJ_EMBEDDING_DIMENSION", "384"))
 
 # LLM (via Ollama)
 OLLAMA_HOST = os.getenv("YLJ_OLLAMA_HOST", "http://localhost:11434")
-LLM_MODEL = os.getenv("YLJ_LLM_MODEL", "qwen2.5:7b")
+LLM_MODEL = os.getenv("YLJ_LLM_MODEL", "gemma4:e4b")
 LLM_MAX_NEW_TOKENS = int(os.getenv("YLJ_LLM_MAX_NEW_TOKENS", "512"))
 LLM_TEMPERATURE = float(os.getenv("YLJ_LLM_TEMPERATURE", "0.7"))
 

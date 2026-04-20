@@ -6,7 +6,11 @@ and the two HTML pages are the only consumers.
 """
 
 import hashlib
+import json
+import os
+import shutil
 import subprocess
+import sys
 import threading
 from ipaddress import ip_address
 from pathlib import Path
@@ -15,21 +19,46 @@ import psutil
 import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ylj import scanner
-from ylj.config import LLM_MODEL, SERVER_HOST, SERVER_PORT
+from ylj.config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, LLM_MODEL, SERVER_HOST, SERVER_PORT
 from ylj.llm import status as ollama_status_check
 from ylj.probe import probe as probe_hardware
 from ylj.rag import query
+
+
+def _resolve_ollama() -> str:
+    """Find ollama.exe even if PATH hasn't been refreshed post-install."""
+    found = shutil.which("ollama")
+    if found:
+        return found
+    if sys.platform == "win32":
+        for candidate in (
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
+            Path(os.environ.get("ProgramFiles", "")) / "Ollama" / "ollama.exe",
+        ):
+            if candidate.exists():
+                return str(candidate)
+    return "ollama"  # let subprocess raise FileNotFoundError with the bare name
 
 app = FastAPI(title="YourLocalJared RAG API")
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 app.mount("/src", StaticFiles(directory=STATIC_DIR / "src"), name="src")
+
+
+@app.middleware("http")
+async def no_cache_jsx(request: Request, call_next):
+    """Disable browser cache for JSX files; chat.html loads them without
+    version hashes, so stale copies stick forever in dev otherwise."""
+    response = await call_next(request)
+    if request.url.path.startswith("/src/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 # ── Setup state (for tracking model downloads) ──────────
 _setup_status = {"done": True, "message": "idle"}
@@ -66,13 +95,10 @@ def system_info():
     return {"ram_gb": ram_gb, "device": device}
 
 
-@app.get("/api/setup/probe")
-def probe(request: Request):
-    """Detailed hardware probe for the onboarding wizard (localhost only)."""
-    client_host = request.client.host if request.client else None
-    request_host = request.url.hostname
-
-    def is_loopback_host(host: str | None) -> bool:
+def _is_loopback_request(request: Request) -> bool:
+    """Both transport peer and request host must be loopback. Guards endpoints
+    that would be dangerous to expose on the LAN (path-accepting, long-running)."""
+    def ok(host: str | None) -> bool:
         if host is None:
             return False
         try:
@@ -80,13 +106,15 @@ def probe(request: Request):
         except ValueError:
             return host in {"localhost", "127.0.0.1", "::1"}
 
-    # Guard on both transport peer and request host. This avoids relying
-    # solely on request.client.host, which may be loopback behind a reverse proxy.
-    is_loopback = is_loopback_host(client_host) and is_loopback_host(request_host)
+    client_host = request.client.host if request.client else None
+    return ok(client_host) and ok(request.url.hostname)
 
-    if not is_loopback:
+
+@app.get("/api/setup/probe")
+def probe(request: Request):
+    """Detailed hardware probe for the onboarding wizard (localhost only)."""
+    if not _is_loopback_request(request):
         raise HTTPException(status_code=403, detail="probe endpoint is localhost only")
-
     return probe_hardware()
 
 
@@ -94,6 +122,16 @@ def probe(request: Request):
 def ollama_status():
     """Check whether the Ollama daemon is reachable and list pulled models."""
     return ollama_status_check()
+
+
+@app.get("/api/config")
+def runtime_config():
+    """Expose the resolved runtime config so the UI never hardcodes model ids."""
+    return {
+        "llm_model": LLM_MODEL,
+        "embedding_model": EMBEDDING_MODEL,
+        "embedding_dimension": EMBEDDING_DIMENSION,
+    }
 
 
 @app.get("/api/setup/folders")
@@ -120,22 +158,28 @@ class SetupConfig(BaseModel):
     llm_model: str
     embedding_model: str
     embedding_dimension: int
-    documents_dir: str
 
 
 @app.post("/api/setup/apply")
-def apply_setup(config: SetupConfig):
-    """Save configuration to .env and trigger model downloads."""
+def apply_setup(config: SetupConfig, request: Request):
+    """Save configuration to .env and trigger model downloads. Ingestion is
+    handled separately by `/api/setup/ingest` (step 07 in the wizard).
+
+    Localhost only — this endpoint writes `.env` and spawns subprocesses
+    (Ollama pull + sentence-transformers download), neither of which should
+    be reachable from the LAN given the server defaults to binding 0.0.0.0
+    for the onboarding flow.
+    """
+    if not _is_loopback_request(request):
+        raise HTTPException(status_code=403, detail="apply endpoint is localhost only")
     global _setup_status
     project_root = Path(__file__).parent.parent
     env_path = project_root / ".env"
 
-    # Write .env
     lines = [
         f"YLJ_LLM_MODEL={config.llm_model}",
         f"YLJ_EMBEDDING_MODEL={config.embedding_model}",
         f"YLJ_EMBEDDING_DIMENSION={config.embedding_dimension}",
-        f"YLJ_DOCUMENTS_DIR={config.documents_dir}",
     ]
     env_path.write_text("\n".join(lines) + "\n")
 
@@ -145,44 +189,64 @@ def apply_setup(config: SetupConfig):
     def download_models():
         global _setup_status
         try:
-            venv_python = project_root / ".venv" / "bin" / "python"
-            python_cmd = str(venv_python) if venv_python.exists() else "python"
+            venv_python = next(
+                (p for p in (
+                    project_root / ".venv" / "Scripts" / "python.exe",
+                    project_root / ".venv" / "bin" / "python",
+                ) if p.exists()),
+                None,
+            )
+            python_cmd = str(venv_python) if venv_python else sys.executable
 
-            # Download embedding model. Pass the ID as argv so a crafted
-            # value can't break out of the `python -c` string — the endpoint
-            # is unauth'd and the server binds 0.0.0.0 by default.
-            _setup_status["message"] = (
-                f"Downloading embedding model ({config.embedding_model})..."
-            )
-            download_snippet = (
-                "import sys; from sentence_transformers import SentenceTransformer; "
-                "SentenceTransformer(sys.argv[1])"
-            )
-            subprocess.run(
-                [python_cmd, "-c", download_snippet, config.embedding_model],
-                check=True, capture_output=True,
-            )
-
-            # Pull LLM via Ollama
-            _setup_status["message"] = (
-                f"Pulling LLM ({config.llm_model}) via Ollama... This may take a while."
-            )
-            subprocess.run(
-                ["ollama", "pull", "--", config.llm_model],
-                check=True, capture_output=True, timeout=600,
-            )
-
-            # Ingest documents from the configured folder
-            doc_dir = Path(config.documents_dir)
-            if doc_dir.exists() and any(doc_dir.iterdir()):
-                _setup_status["message"] = f"Ingesting documents from {doc_dir}..."
+            # Embedding model: skip the download if HuggingFace already
+            # has it cached. SentenceTransformer() loads instantly from
+            # the cache anyway, but spawning a subprocess is still ~1s
+            # wasted and the log message misleads the user.
+            hf_slug = "models--" + config.embedding_model.replace("/", "--")
+            hf_cache = Path.home() / ".cache" / "huggingface" / "hub" / hf_slug
+            if hf_cache.exists():
+                _setup_status["message"] = (
+                    f"Embedding model ({config.embedding_model}) already cached "
+                    "— skipping download."
+                )
+            else:
+                # Pass the ID as argv so a crafted value can't break out
+                # of the `python -c` string — the endpoint is unauth'd
+                # and the server binds 0.0.0.0 by default.
+                _setup_status["message"] = (
+                    f"Downloading embedding model ({config.embedding_model})..."
+                )
+                download_snippet = (
+                    "import sys; from sentence_transformers import SentenceTransformer; "
+                    "SentenceTransformer(sys.argv[1])"
+                )
                 subprocess.run(
-                    [python_cmd, "-m", "ylj.ingest", "--dir", str(doc_dir)],
+                    [python_cmd, "-c", download_snippet, config.embedding_model],
                     check=True, capture_output=True,
-                    cwd=str(project_root),
+                )
+
+            # LLM: skip the pull if Ollama already has the tag.
+            already_pulled = config.llm_model in ollama_status_check().get("models", [])
+            if already_pulled:
+                _setup_status["message"] = (
+                    f"LLM ({config.llm_model}) already pulled — skipping."
+                )
+            else:
+                _setup_status["message"] = (
+                    f"Pulling LLM ({config.llm_model}) via Ollama... This may take a while."
+                )
+                subprocess.run(
+                    [_resolve_ollama(), "pull", "--", config.llm_model],
+                    check=True, capture_output=True, timeout=600,
                 )
 
             _setup_status = {"done": True, "message": "ready"}
+        except subprocess.CalledProcessError as e:
+            # Surface stderr so the user sees what actually failed, not just
+            # "exit status 1".
+            stderr = (e.stderr or b"").decode(errors="replace").strip()
+            detail = stderr.splitlines()[-1] if stderr else str(e)
+            _setup_status = {"done": True, "message": f"Error: {detail}"}
         except Exception as e:
             _setup_status = {"done": True, "message": f"Error: {e}"}
 
@@ -194,6 +258,42 @@ def apply_setup(config: SetupConfig):
 def setup_status():
     """Check model download progress."""
     return _setup_status
+
+
+class IngestRequest(BaseModel):
+    folders: list[str]
+    extensions: list[str] | None = None
+
+
+@app.post("/api/setup/ingest")
+def setup_ingest(body: IngestRequest, request: Request):
+    """Stream real progress events from the ingest pipeline as ndjson.
+
+    Each newline-delimited JSON line is one event: scan / parse / embed /
+    store / done / error. The wizard's step-07 animation consumes these to
+    drive its phase indicator, file log, and counters."""
+    if not _is_loopback_request(request):
+        raise HTTPException(status_code=403, detail="ingest endpoint is localhost only")
+
+    safe_dirs: list[Path] = []
+    for raw in body.folders:
+        try:
+            safe_dirs.append(scanner.safe_home_path(raw))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"unsafe path {raw!r}: {e}") from e
+
+    if not safe_dirs:
+        raise HTTPException(status_code=400, detail="no folders provided")
+
+    ext = {e.lower() for e in body.extensions} if body.extensions else None
+
+    from ylj.ingest import ingest_stream
+
+    def event_stream():
+        for ev in ingest_stream(safe_dirs, ext):
+            yield (json.dumps(ev) + "\n").encode("utf-8")
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
 
 # ── Chat API (used by ylj/static/chat.html) ─────────────

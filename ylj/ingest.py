@@ -1,30 +1,154 @@
-"""Document ingestion CLI — parse, chunk, embed, and store documents."""
+"""Document ingestion — parse, chunk, embed, and store.
+
+Exposes `ingest_stream()` (generator yielding progress events, consumed by
+the /api/setup/ingest streaming endpoint) and a thin `ingest()` wrapper for
+the CLI entry point.
+"""
 
 import argparse
+import time
 from pathlib import Path
+from typing import Iterator
 
 from ylj.config import DOCUMENTS_DIR
-from ylj.documents import load_documents
-from ylj.embeddings import embed_texts
+from ylj.documents import (
+    PARSERS,
+    SKIP_DIRS,
+    SUPPORTED_EXTENSIONS,
+    parse_document,
+    split_chunks,
+)
+from ylj.embeddings import get_embedding_model
 from ylj.vectorstore import ensure_collection, upsert_chunks
 
+EMBED_BATCH = 64
 
-def ingest(directory: Path):
-    """Ingest all documents from a directory into Qdrant."""
-    ensure_collection()
 
-    chunks = load_documents(directory)
-    if not chunks:
-        print("No documents found to ingest.")
-        return
+def _skip_path(path: Path) -> bool:
+    return any(part in SKIP_DIRS or part.endswith(".egg-info") for part in path.parts)
 
-    print(f"Embedding {len(chunks)} chunks...")
-    texts = [c.text for c in chunks]
-    embeddings = embed_texts(texts)
 
-    print("Storing in Qdrant...")
-    upsert_chunks(chunks, embeddings)
-    print("Ingestion complete.")
+def _enumerate_files(dirs: list[Path], allowed_exts: set[str]) -> list[Path]:
+    seen: set[Path] = set()
+    files: list[Path] = []
+    for d in dirs:
+        d = d.expanduser()
+        if not d.exists():
+            continue
+        for p in sorted(d.rglob("*")):
+            if (
+                p.is_file()
+                and p.suffix.lower() in allowed_exts
+                and not _skip_path(p)
+                and p not in seen
+            ):
+                seen.add(p)
+                files.append(p)
+    return files
+
+
+def ingest_stream(
+    dirs: list[Path],
+    extensions: set[str] | None = None,
+) -> Iterator[dict]:
+    """Run the ingest pipeline, yielding progress events.
+
+    Embedding and storage happen incrementally in `EMBED_BATCH`-sized
+    batches as files are parsed, so peak memory stays bounded regardless
+    of how many GB of documents the user pointed us at and `embed`/`store`
+    progress events reflect real work rather than a single end-of-run flush.
+
+    Event shapes:
+        {"phase": "scan",  "total_files": int}
+        {"phase": "parse", "file": str, "chunks": int, "ms": int, "files_done": int}
+        {"phase": "embed", "chunks_done": int}
+        {"phase": "store", "chunks_done": int}
+        {"phase": "done",  "files": int, "chunks": int}
+        {"phase": "error", "message": str}
+    """
+    try:
+        allowed = {e.lower() for e in (extensions or SUPPORTED_EXTENSIONS)} & set(PARSERS.keys())
+
+        ensure_collection()
+
+        files = _enumerate_files(dirs, allowed)
+        yield {"phase": "scan", "total_files": len(files)}
+
+        if not files:
+            yield {"phase": "done", "files": 0, "chunks": 0}
+            return
+
+        model = get_embedding_model()
+
+        buffer: list = []
+        total_chunks = 0
+
+        def flush():
+            """Embed + upsert whatever's in `buffer`, yielding phase events."""
+            nonlocal buffer
+            if not buffer:
+                return
+            batch = buffer
+            buffer = []
+            texts = [c.text for c in batch]
+            yield {"phase": "embed", "chunks_done": total_chunks}
+            embeddings = model.encode(texts, show_progress_bar=False).tolist()
+            yield {"phase": "store", "chunks_done": total_chunks}
+            upsert_chunks(batch, embeddings)
+
+        for idx, path in enumerate(files, start=1):
+            t0 = time.perf_counter()
+            raw = parse_document(path)
+            chunked = split_chunks(raw)
+            buffer.extend(chunked)
+            total_chunks += len(chunked)
+            yield {
+                "phase": "parse",
+                "file": str(path),
+                "chunks": len(chunked),
+                "ms": int((time.perf_counter() - t0) * 1000),
+                "files_done": idx,
+            }
+            while len(buffer) >= EMBED_BATCH:
+                # Carve off exactly one batch so memory stays bounded even
+                # when a single file produces many chunks.
+                head, buffer = buffer[:EMBED_BATCH], buffer[EMBED_BATCH:]
+                texts = [c.text for c in head]
+                yield {"phase": "embed", "chunks_done": total_chunks - len(buffer)}
+                embeddings = model.encode(texts, show_progress_bar=False).tolist()
+                yield {"phase": "store", "chunks_done": total_chunks - len(buffer)}
+                upsert_chunks(head, embeddings)
+
+        # Flush the trailing partial batch.
+        yield from flush()
+
+        yield {"phase": "done", "files": len(files), "chunks": total_chunks}
+    except Exception as e:
+        yield {"phase": "error", "message": str(e)}
+
+
+def ingest(directory: Path) -> None:
+    """CLI wrapper — consume the event stream and print human-readable progress."""
+    errored = False
+    last_phase = None
+    for ev in ingest_stream([directory]):
+        phase = ev.get("phase")
+        if phase == "scan":
+            print(f"Found {ev['total_files']} files to ingest.")
+        elif phase == "parse":
+            print(f"  [{ev['files_done']}] {ev['file']} → {ev['chunks']} chunks ({ev['ms']}ms)")
+        elif phase == "embed" and last_phase != "embed":
+            print(f"Embedding chunks (batch starts at {ev.get('chunks_done', 0)})...")
+        elif phase == "store" and last_phase != "store":
+            print("Storing chunks...")
+        elif phase == "done":
+            print(f"Done: {ev.get('files', 0)} files, {ev.get('chunks', 0)} chunks.")
+        elif phase == "error":
+            print(f"Error: {ev['message']}")
+            errored = True
+        last_phase = phase
+    if errored:
+        raise SystemExit(1)
 
 
 def main():

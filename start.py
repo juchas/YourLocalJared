@@ -23,8 +23,9 @@ def main():
     # 2. Start the RAG API server
     from ylj.config import SERVER_HOST, SERVER_PORT
     print(f"\n=== Starting RAG server on {SERVER_HOST}:{SERVER_PORT} ===")
-    print("API docs at http://localhost:8000/docs")
-    print("Connect Open WebUI to http://localhost:8000/v1\n")
+    print(f"Setup wizard at http://localhost:{SERVER_PORT}/setup")
+    print(f"Chat UI at       http://localhost:{SERVER_PORT}/chat")
+    print(f"API docs at      http://localhost:{SERVER_PORT}/docs\n")
 
     import uvicorn
     uvicorn.run("ylj.server:app", host=SERVER_HOST, port=SERVER_PORT)
