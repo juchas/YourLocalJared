@@ -11,7 +11,7 @@ const STEPS = [
   { id: 'handoff',  label: 'launch' },
 ];
 
-function TopBar({ step }) {
+function TopBar({ step, onOpenTweaks }) {
   return (
     <div style={{
       height: 44, borderBottom: '1px solid var(--border)',
@@ -32,6 +32,20 @@ function TopBar({ step }) {
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
           100% local
         </span>
+        {onOpenTweaks && (
+          <button
+            onClick={onOpenTweaks}
+            title="Preferences (theme, font size, motion)"
+            aria-label="Open preferences"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 26, height: 26, border: '1px solid var(--border)',
+              background: 'transparent', color: 'var(--text-dim)', cursor: 'pointer',
+            }}
+          >
+            <Icon name="cog" size={12} />
+          </button>
+        )}
       </div>
     </div>
   );

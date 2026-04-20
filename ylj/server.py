@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from ipaddress import ip_address
 from pathlib import Path
 
@@ -43,6 +44,46 @@ def _resolve_ollama() -> str:
             if candidate.exists():
                 return str(candidate)
     return "ollama"  # let subprocess raise FileNotFoundError with the bare name
+
+
+def _ensure_ollama_running(timeout_s: float = 8.0) -> bool:
+    """Best-effort: start the Ollama daemon if it isn't already up.
+
+    Returns True if the daemon is reachable on return. The installer
+    drops `ollama` on $PATH but doesn't start the daemon — that bites
+    first-run on macOS especially, where users see "could not connect
+    to ollama server" the moment they hit /api/setup/apply. We spawn
+    `ollama serve` detached from this process (no inherited fds, new
+    session) so it survives beyond the current request, then poll
+    status until it accepts connections.
+    """
+    if ollama_status_check().get("running"):
+        return True
+    try:
+        kwargs = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        # start_new_session detaches on POSIX; Windows uses a flag instead.
+        if sys.platform == "win32":
+            kwargs["creationflags"] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+                | getattr(subprocess, "DETACHED_PROCESS", 0)
+            )
+        else:
+            kwargs["start_new_session"] = True
+        subprocess.Popen([_resolve_ollama(), "serve"], **kwargs)
+    except (FileNotFoundError, OSError):
+        return False
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if ollama_status_check().get("running"):
+            return True
+        time.sleep(0.25)
+    return False
+
 
 app = FastAPI(title="YourLocalJared RAG API")
 
@@ -237,6 +278,18 @@ def apply_setup(config: SetupConfig, request: Request):
                     [python_cmd, "-c", download_snippet, config.embedding_model],
                     check=True, capture_output=True,
                 )
+
+            # Make sure the Ollama daemon is up before we talk to it.
+            # The installer drops `ollama` on $PATH but doesn't start the
+            # daemon; without this, the pull below fails with "could not
+            # connect to ollama server" on a brand-new install.
+            if not ollama_status_check().get("running"):
+                _setup_status["message"] = "Starting Ollama daemon..."
+                if not _ensure_ollama_running():
+                    raise RuntimeError(
+                        "Could not start the Ollama daemon. Run `ollama serve` "
+                        "in another terminal and retry."
+                    )
 
             # LLM: skip the pull if Ollama already has the tag.
             already_pulled = config.llm_model in ollama_status_check().get("models", [])
