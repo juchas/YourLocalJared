@@ -5,6 +5,9 @@ quantization, and GPU offload. We just POST a chat request and surface
 clean errors when the daemon is down or the model isn't pulled.
 """
 
+import json
+from typing import Iterator
+
 import httpx
 
 from ylj.config import (
@@ -94,6 +97,87 @@ def generate(question: str, context_chunks: list[dict], model: str | None = None
         raise RuntimeError("Ollama response missing 'message.content' string.")
 
     return content.strip()
+
+
+def _stream_payload(question: str, context_chunks: list[dict], model: str | None) -> dict:
+    resolved_model = model or LLM_MODEL
+    prompt = RAG_PROMPT_TEMPLATE.format(
+        context=_format_context(context_chunks),
+        question=question,
+    )
+    return {
+        "model": resolved_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": True,
+        "options": {
+            "temperature": LLM_TEMPERATURE,
+            "num_predict": LLM_MAX_NEW_TOKENS,
+        },
+    }
+
+
+def generate_stream(
+    question: str,
+    context_chunks: list[dict],
+    model: str | None = None,
+) -> Iterator[str]:
+    """Stream tokens from Ollama's chat endpoint.
+
+    Yields each `message.content` delta as it arrives. Raises the same
+    `RuntimeError` surfaces as `generate()` for daemon-down / model-missing
+    / non-2xx so the UI can handle both code paths identically.
+    """
+    resolved_model = model or LLM_MODEL
+    payload = _stream_payload(question, context_chunks, resolved_model)
+    url = f"{OLLAMA_HOST.rstrip('/')}/api/chat"
+
+    try:
+        client = httpx.Client(timeout=300)
+    except Exception as e:  # very rare — httpx constructor rarely fails
+        raise RuntimeError(f"Failed to create HTTP client: {e}") from e
+
+    try:
+        try:
+            stream_ctx = client.stream("POST", url, json=payload)
+        except httpx.ConnectError as e:
+            raise RuntimeError(
+                f"Ollama daemon not reachable at {OLLAMA_HOST}. "
+                "Is it running? Try `ollama serve` or install from https://ollama.com."
+            ) from e
+
+        with stream_ctx as response:
+            if response.status_code == 404:
+                raise RuntimeError(
+                    f"Model '{resolved_model}' not pulled. "
+                    f"Run: ollama pull {resolved_model}"
+                )
+            if response.status_code >= 400:
+                body = response.read().decode("utf-8", errors="replace")[:200]
+                raise RuntimeError(
+                    f"Ollama returned HTTP {response.status_code}: {body}"
+                )
+
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except ValueError:
+                    # Malformed line — skip rather than kill the stream.
+                    continue
+                if not isinstance(chunk, dict):
+                    continue
+                message = chunk.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str) and content:
+                        yield content
+                if chunk.get("done") is True:
+                    return
+    except httpx.HTTPError as e:
+        raise RuntimeError(f"Ollama request failed: {e}") from e
+    finally:
+        client.close()
 
 
 def status() -> dict:

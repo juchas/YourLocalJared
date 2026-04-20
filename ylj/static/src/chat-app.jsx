@@ -163,71 +163,42 @@ function App() {
     } : c));
 
     // Build wire-format history (UI state uses `text`; API expects `content`).
-    // The backend only reads the last user message today, but sending full
-    // history keeps the contract stable for future multi-turn support.
     const convo = conversations.find(c => c.id === activeId);
     const history = (convo?.messages || []).map(m => ({ role: m.role, content: m.text }));
     const wire = [...history, { role: 'user', content: text }];
 
     setStreaming({ model: modelId, text: '', phase: 'retrieving' });
     thinkTimerRef.current = setTimeout(() => {
-      setStreaming(s => s && { ...s, phase: 'thinking' });
+      setStreaming(s => s && s.phase === 'retrieving' ? { ...s, phase: 'thinking' } : s);
     }, 300);
 
     const controller = new AbortController();
     abortRef.current = controller;
     const t0 = performance.now();
 
-    try {
-      const r = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelId, messages: wire, scopeId, k }),
-        signal: controller.signal,
-      });
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        throw new Error(err.detail || err.error || `HTTP ${r.status}`);
-      }
-      const data = await r.json();
-      if (controller.signal.aborted) return;
-      if (thinkTimerRef.current) { clearTimeout(thinkTimerRef.current); thinkTimerRef.current = null; }
-
-      const answer = data.answer || '';
-      const sources = Array.isArray(data.sources) ? data.sources : [];
+    // Commit the final assistant message into the active conversation.
+    const commit = (answer, sources, finalModel) => {
       const latency = Math.round(performance.now() - t0);
+      const tokens = Math.floor(answer.length / 4);
+      const botMsg = {
+        id: 'b' + Date.now(), role: 'assistant', text: answer, ts: Date.now(),
+        model: finalModel || modelId, sources,
+        meta: {
+          latency,
+          tokens,
+          tokensPerSec: Math.round(tokens / Math.max(latency / 1000, 0.1)),
+        },
+      };
+      setConversations(cs => cs.map(c => c.id === activeId ? { ...c, messages: [...c.messages, botMsg] } : c));
+      setStreaming(null);
+      setSourcesFor(sources);
+      setSourcesFocus(0);
+      abortRef.current = null;
+    };
 
-      // Reveal the answer gradually so the UI stays alive even though
-      // the backend response is non-streaming for now.
-      setStreaming(s => s && { ...s, phase: 'streaming', text: '' });
-      let i = 0;
-      const step = Math.max(1, Math.ceil(answer.length / 80));
-      const iv = setInterval(() => {
-        if (controller.signal.aborted) { clearInterval(iv); return; }
-        i = Math.min(answer.length, i + step);
-        setStreaming(s => s && { ...s, text: answer.slice(0, i) });
-        if (i >= answer.length) {
-          clearInterval(iv);
-          const botMsg = {
-            id: 'b' + Date.now(), role: 'assistant', text: answer, ts: Date.now(),
-            model: data.model || modelId, sources,
-            meta: {
-              latency,
-              tokens: Math.floor(answer.length / 4),
-              tokensPerSec: Math.round((answer.length / 4) / Math.max(latency / 1000, 0.1)),
-            },
-          };
-          setConversations(cs => cs.map(c => c.id === activeId ? { ...c, messages: [...c.messages, botMsg] } : c));
-          setStreaming(null);
-          setSourcesFor(sources);
-          setSourcesFocus(0);
-          abortRef.current = null;
-        }
-      }, 16);
-    } catch (e) {
+    const pushErrorBubble = (err) => {
       if (thinkTimerRef.current) { clearTimeout(thinkTimerRef.current); thinkTimerRef.current = null; }
-      if (controller.signal.aborted || e?.name === 'AbortError') return;
-      const message = `⚠︎ chat failed: ${e.message || e}`;
+      const message = `⚠︎ chat failed: ${err}`;
       const botMsg = {
         id: 'b' + Date.now(), role: 'assistant', text: message, ts: Date.now(),
         model: modelId, sources: [],
@@ -236,6 +207,66 @@ function App() {
       setConversations(cs => cs.map(c => c.id === activeId ? { ...c, messages: [...c.messages, botMsg] } : c));
       setStreaming(null);
       abortRef.current = null;
+    };
+
+    try {
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelId, messages: wire, scopeId, k, stream: true }),
+        signal: controller.signal,
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || err.error || `HTTP ${r.status}`);
+      }
+      if (thinkTimerRef.current) { clearTimeout(thinkTimerRef.current); thinkTimerRef.current = null; }
+
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let answer = '';
+      let sources = [];
+      let sawDone = false;
+      let streamError = null;
+
+      // SSE frames are separated by `\n\n`. Each frame has one `data:` line
+      // carrying a JSON event. Keep a rolling buffer so partial frames
+      // survive across reader chunks.
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          const line = frame.split('\n').find(l => l.startsWith('data: '));
+          if (!line) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+          if (ev.event === 'retrieval') {
+            sources = Array.isArray(ev.sources) ? ev.sources : [];
+            setSourcesFor(sources);
+          } else if (ev.event === 'token' && typeof ev.text === 'string') {
+            answer += ev.text;
+            setStreaming(s => s && { ...s, phase: 'streaming', text: answer });
+          } else if (ev.event === 'error') {
+            streamError = ev.message || 'stream error';
+          } else if (ev.event === 'done') {
+            sawDone = true;
+          }
+        }
+      }
+
+      if (controller.signal.aborted) return;
+      if (streamError) { pushErrorBubble(streamError); return; }
+      if (!sawDone && !answer) { pushErrorBubble('empty stream'); return; }
+      commit(answer, sources, modelId);
+    } catch (e) {
+      if (thinkTimerRef.current) { clearTimeout(thinkTimerRef.current); thinkTimerRef.current = null; }
+      if (controller.signal.aborted || e?.name === 'AbortError') return;
+      pushErrorBubble(e.message || e);
     }
   };
 
