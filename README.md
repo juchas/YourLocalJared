@@ -9,10 +9,10 @@ A fully local RAG (Retrieval-Augmented Generation) chat that runs on your own ma
 ## Requirements
 
 - ~10 GB of disk (for a small model) plus room for your documents
-- Admin/sudo rights for the one-time install (Homebrew / apt / winget need them)
 - Internet connection during install
+- Python 3.10+ on your machine if you pick the no-admin path (macOS ships with it; python.org has a "just for me" installer on Windows; every mainstream Linux distro includes it)
 
-Git, Python, and Ollama are **installed for you** on a clean VM by the bootstrap scripts below — you don't need them pre-installed.
+The bootstrap scripts will **ask you** whether they can use admin/sudo for the one-time setup. Git and Ollama are installed either way.
 
 ## Install
 
@@ -30,13 +30,44 @@ curl -fsSL https://raw.githubusercontent.com/juchas/YourLocalJared/main/bootstra
 iex (irm https://raw.githubusercontent.com/juchas/YourLocalJared/main/bootstrap.ps1)
 ```
 
-Both scripts:
+The first thing both scripts ask is whether they can use admin:
 
-1. Install git, Python 3.12, and Ollama via the native package manager (Homebrew on macOS, apt/dnf/pacman on Linux, winget on Windows).
-2. Clone the repo to `~/YourLocalJared` (override with `YLJ_INSTALL_DIR`).
-3. Create a venv, install project deps, pre-fetch the default embedding model, and ping Ollama.
+```
+Can YourLocalJared use sudo/admin rights for this install?
+
+  1) Yes — use Homebrew / apt / dnf / pacman (faster, updates via package manager)
+  2) No — install everything to your home directory (no sudo)
+  3) I'm not sure
+
+[1/2/3, default 3]:
+```
+
+**If you pick 1**, the script installs git + Python 3.12 + Ollama via the native package manager (Homebrew on macOS, apt/dnf/pacman on Linux, winget on Windows). Future updates come through `brew upgrade` / `apt upgrade` etc.
+
+**If you pick 2 or 3**, the script installs Ollama into `~/.local/ylj/bin/` (POSIX) or `%LOCALAPPDATA%\YourLocalJared\bin\` (Windows). It won't touch any system dirs or prompt for sudo/UAC. Re-run the bootstrap to update.
+
+Both paths then clone the repo to `~/YourLocalJared` (override with `YLJ_INSTALL_DIR`), create a venv, install project deps, pre-fetch the default embedding model, and start Ollama.
 
 End-to-end time on a fresh VM: ~8–12 min, most of it waiting on downloads. Every step is idempotent — re-running upgrades in place.
+
+### Skipping the prompt
+
+The prompt is only interactive; CI and scripted installs can pin the mode upfront:
+
+```bash
+YLJ_INSTALL_MODE=user curl -fsSL https://.../bootstrap.sh | bash
+# or
+./bootstrap.sh --mode user
+```
+
+```powershell
+$env:YLJ_INSTALL_MODE = 'user'
+iex (irm https://.../bootstrap.ps1)
+# or
+.\bootstrap.ps1 -Mode user
+```
+
+The chosen mode is remembered in `~/.YourLocalJared/install-mode` so subsequent re-runs skip the question.
 
 ### Already cloned the repo?
 
