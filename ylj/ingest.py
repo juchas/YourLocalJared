@@ -70,6 +70,11 @@ def _load_manifest() -> dict[str, dict]:
     return clean
 
 
+def load_manifest() -> dict[str, dict]:
+    """Public wrapper around ``_load_manifest``."""
+    return _load_manifest()
+
+
 def _save_manifest(files: dict[str, dict]) -> None:
     """Atomic write so a crash mid-flush never leaves a partial file."""
     p = _manifest_path()

@@ -26,7 +26,7 @@ window.revealInFolder = async function revealInFolder(path) {
 // Platform-aware tooltip text. Kept here so every caller reads the
 // same wording and we only touch one place when adding an OS.
 window.revealTooltip = function revealTooltip() {
-  const p = (navigator.platform || '').toLowerCase();
+  const p = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '').toLowerCase();
   if (p.includes('mac')) return 'show in Finder';
   if (p.includes('win')) return 'show in File Explorer';
   return 'show in file manager';

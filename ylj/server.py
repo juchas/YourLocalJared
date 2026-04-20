@@ -232,9 +232,9 @@ def reveal_endpoint(body: RevealRequest, request: Request):
     # Manifest gate — never reveal arbitrary files, only indexed ones.
     # Imported lazily so the import graph stays the same as before and
     # the chat code path doesn't pay for this.
-    from ylj.ingest import _load_manifest
+    from ylj.ingest import load_manifest
 
-    manifest = _load_manifest()
+    manifest = load_manifest()
     if str(safe) not in manifest:
         raise HTTPException(
             status_code=403,

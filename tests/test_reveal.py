@@ -4,7 +4,7 @@ The subprocess is always spied — we never actually spawn Finder /
 Explorer / xdg-open during the test run.
 """
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +30,7 @@ def test_reveal_uses_open_minus_R_on_macos(monkeypatch):
     monkeypatch.setattr(reveal, "_detached_popen", fake)
     monkeypatch.setattr(reveal.sys, "platform", "darwin")
 
-    reveal.reveal_in_folder(Path("/Users/x/Documents/file.pdf"))
+    reveal.reveal_in_folder(PurePosixPath("/Users/x/Documents/file.pdf"))
 
     assert calls == [["open", "-R", "/Users/x/Documents/file.pdf"]]
 
@@ -57,7 +57,7 @@ def test_reveal_opens_parent_on_linux(monkeypatch):
     monkeypatch.setattr(reveal, "_detached_popen", fake)
     monkeypatch.setattr(reveal.sys, "platform", "linux")
 
-    reveal.reveal_in_folder(Path("/home/x/docs/file.pdf"))
+    reveal.reveal_in_folder(PurePosixPath("/home/x/docs/file.pdf"))
 
     # No cross-DE select; opening the parent directory is the realistic
     # target.
@@ -85,6 +85,30 @@ def test_detached_popen_uses_new_session_on_posix(monkeypatch):
     assert captured["kwargs"]["stdin"] == reveal.subprocess.DEVNULL
     assert captured["kwargs"]["stdout"] == reveal.subprocess.DEVNULL
     assert captured["kwargs"]["stderr"] == reveal.subprocess.DEVNULL
+
+
+def test_detached_popen_uses_detached_process_on_windows(monkeypatch):
+    """The subprocess call on Windows must set DETACHED_PROCESS so the
+    file manager survives a server restart."""
+    captured: dict = {}
+
+    def fake_subprocess_popen(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(reveal.sys, "platform", "win32")
+    monkeypatch.setattr(reveal.subprocess, "Popen", fake_subprocess_popen)
+    # These constants only exist on Windows; patch them so the test runs everywhere.
+    monkeypatch.setattr(reveal.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr(reveal.subprocess, "DETACHED_PROCESS", 8, raising=False)
+
+    reveal._detached_popen(["explorer.exe", r"/select,C:\test.pdf"])
+
+    assert "start_new_session" not in captured["kwargs"]
+    flags = captured["kwargs"].get("creationflags", 0)
+    assert flags & 8  # DETACHED_PROCESS bit
+    assert flags & 512  # CREATE_NEW_PROCESS_GROUP bit
 
 
 # ── /api/reveal endpoint guards ─────────────────────────────────
