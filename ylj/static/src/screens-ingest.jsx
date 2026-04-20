@@ -20,6 +20,11 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
   const [totalFiles, setTotalFiles] = useState(Math.max(1, Math.floor(estimatedFiles)));
   const [filesProcessed, setFilesProcessed] = useState(0);
   const [chunks, setChunks] = useState(0);
+  const [skipped, setSkipped] = useState(0);
+  const [orphans, setOrphans] = useState(0);
+  const [pruned, setPruned] = useState(0);
+  const [rebuild, setRebuild] = useState(false);
+  const [rerun, setRerun] = useState(0);
   const [done, setDone] = useState(false);
   const [error, setError] = useState(null);
   const [log, setLog] = useState([]);
@@ -43,6 +48,9 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
     setPhaseIdx(0);
     setFilesProcessed(0);
     setChunks(0);
+    setSkipped(0);
+    setOrphans(0);
+    setPruned(0);
     setDone(false);
     setError(null);
     setLog([]);
@@ -51,9 +59,24 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
     const handleEvent = (ev) => {
       if (cancelled) return;
       switch (ev.phase) {
+        case 'rebuild':
+          setLog(l => [{
+            t: stamp(), file: `rebuild: ${ev.reason || 'full re-embed'}`, chunks: 0, ms: 0, kind: 'rebuild',
+          }, ...l].slice(0, 40));
+          break;
         case 'scan':
           setPhaseIdx(i => Math.max(i, phaseIndex.scan));
           setTotalFiles(Math.max(1, ev.total_files | 0));
+          setSkipped(ev.skipped | 0);
+          setOrphans(ev.orphans | 0);
+          break;
+        case 'prune':
+          setPruned(p => p + 1);
+          setLog(l => [{
+            t: stamp(),
+            file: `pruned ${typeof ev.file === 'string' ? ev.file.split(/[\\/]/).slice(-2).join('/') : ''}`,
+            chunks: 0, ms: 0, kind: 'prune',
+          }, ...l].slice(0, 40));
           break;
         case 'parse': {
           setPhaseIdx(i => Math.max(i, phaseIndex.parse));
@@ -63,7 +86,7 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
             ? ev.file.split(/[\\/]/).slice(-2).join('/')
             : '(unknown)';
           setLog(l => [{
-            t: stamp(), file: displayFile, chunks: ev.chunks | 0, ms: ev.ms | 0,
+            t: stamp(), file: displayFile, chunks: ev.chunks | 0, ms: ev.ms | 0, kind: 'parse',
           }, ...l].slice(0, 40));
           break;
         }
@@ -77,6 +100,8 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           setPhaseIdx(phaseIndex.store);
           if (typeof ev.files === 'number') setFilesProcessed(ev.files);
           if (typeof ev.chunks === 'number') setChunks(ev.chunks);
+          if (typeof ev.skipped === 'number') setSkipped(ev.skipped);
+          if (typeof ev.pruned === 'number') setPruned(ev.pruned);
           setDone(true);
           break;
         case 'error':
@@ -105,6 +130,7 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           body: JSON.stringify({
             folders: selectedFolders.map(f => f.path),
             extensions: enabledExtensions,
+            rebuild,
           }),
           signal: controller.signal,
         });
@@ -157,10 +183,16 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
     return () => { cancelled = true; controller.abort(); };
     // Re-run when the folder/filetype selection becomes available or
     // changes (e.g. browser reload landing directly on step 07 before
-    // /api/setup/folders has resolved).
-  }, [folders, fileTypes]);
+    // /api/setup/folders has resolved), and when the user clicks the
+    // "run again" button (which bumps `rerun`).
+  }, [folders, fileTypes, rerun]);
 
-  const pct = totalFiles > 0 ? Math.min(100, (filesProcessed / totalFiles) * 100) : (done ? 100 : 0);
+  // total_files is "files to process this run" — when everything was
+  // already up to date it's 0 and we'd divide by zero. Count skipped
+  // files as implicitly done so the ring lands on 100% in that case.
+  const denom = totalFiles + skipped;
+  const numerator = filesProcessed + skipped;
+  const pct = denom > 0 ? Math.min(100, (numerator / denom) * 100) : (done ? 100 : 0);
   const displayPct = done && !error ? 100 : pct;
   const SZ = 180;
   const R = (SZ - 16) / 2;
@@ -210,6 +242,14 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
                 </div>
               ))}
             </div>
+            {(skipped > 0 || orphans > 0 || pruned > 0) && (
+              <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dimmer)', marginBottom: 14, fontVariantNumeric: 'tabular-nums' }}>
+                {skipped > 0 && <span>{skipped.toLocaleString()} unchanged</span>}
+                {skipped > 0 && (orphans > 0 || pruned > 0) && <span> · </span>}
+                {pruned > 0 && <span>{pruned.toLocaleString()} pruned</span>}
+                {pruned === 0 && orphans > 0 && <span>{orphans.toLocaleString()} orphaned</span>}
+              </div>
+            )}
             <div style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-dimmer)', marginBottom: 8 }}>pipeline</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {phases.map((ph, i) => {
@@ -234,6 +274,24 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
                 );
               })}
             </div>
+            {done && !error && (
+              <div style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-dim)', cursor: 'pointer' }}>
+                  <Check checked={rebuild} onChange={setRebuild} />
+                  <span>full rebuild</span>
+                </label>
+                <button
+                  onClick={() => setRerun(n => n + 1)}
+                  style={{
+                    padding: '6px 12px', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
+                    color: 'var(--text-dim)', border: '1px solid var(--border)', background: 'transparent',
+                    cursor: 'pointer',
+                  }}
+                >
+                  run again
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -268,12 +326,17 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           {log.map((l, i) => (
             <Row key={i} accent="var(--accent)" style={{ animation: 'slideIn 0.2s' }}>
               <span style={{ fontSize: 10, color: 'var(--text-faintest)', width: 36, fontVariantNumeric: 'tabular-nums' }}>{l.t}</span>
-              <Icon name="check" size={10} stroke={2.5} style={{ color: 'var(--accent-hi)' }} />
+              <Icon name={l.kind === 'prune' ? 'x' : l.kind === 'rebuild' ? 'cog' : 'check'} size={10} stroke={2.5}
+                style={{ color: l.kind === 'prune' ? 'var(--warn, #c97d17)' : 'var(--accent-hi)' }} />
               <span style={{ flex: 1, fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {l.file}
               </span>
-              <span style={{ width: 70, textAlign: 'right', fontSize: 11, color: 'var(--accent-hi)', fontVariantNumeric: 'tabular-nums' }}>+{l.chunks}</span>
-              <span style={{ width: 60, textAlign: 'right', fontSize: 11, color: 'var(--text-dimmer)', fontVariantNumeric: 'tabular-nums' }}>{l.ms}</span>
+              <span style={{ width: 70, textAlign: 'right', fontSize: 11, color: 'var(--accent-hi)', fontVariantNumeric: 'tabular-nums' }}>
+                {l.chunks > 0 ? `+${l.chunks}` : ''}
+              </span>
+              <span style={{ width: 60, textAlign: 'right', fontSize: 11, color: 'var(--text-dimmer)', fontVariantNumeric: 'tabular-nums' }}>
+                {l.ms > 0 ? l.ms : ''}
+              </span>
             </Row>
           ))}
         </div>
