@@ -101,3 +101,37 @@ def test_setup_apply_rejects_non_loopback(monkeypatch):
     )
     assert r.status_code == 403
     assert "localhost" in r.json()["detail"].lower()
+
+
+# ── _is_loopback_request itself ─────────────────────────────
+
+
+class _FakeClient:
+    def __init__(self, host: str | None):
+        self.host = host
+
+
+class _FakeURL:
+    def __init__(self, hostname: str | None):
+        self.hostname = hostname
+
+
+class _FakeRequest:
+    def __init__(self, peer: str | None, host_header: str | None):
+        self.client = _FakeClient(peer) if peer is not None else None
+        self.url = _FakeURL(host_header)
+
+
+def test_loopback_accepts_common_local_host_headers():
+    # Peer is always loopback here — the Host header is what varies.
+    for host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        assert server._is_loopback_request(_FakeRequest("127.0.0.1", host)), host
+
+
+def test_loopback_rejects_lan_peer_even_with_localhost_host_header():
+    # DNS rebinding wouldn't help an attacker if the peer is off-loopback.
+    assert not server._is_loopback_request(_FakeRequest("192.168.1.42", "localhost"))
+
+
+def test_loopback_rejects_unknown_host_header():
+    assert not server._is_loopback_request(_FakeRequest("127.0.0.1", "evil.example"))
