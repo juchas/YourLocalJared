@@ -3,7 +3,15 @@
 import uuid
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    FilterSelector,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
 
 from ylj.config import COLLECTION_NAME, EMBEDDING_DIMENSION, QDRANT_PATH
 from ylj.documents import Chunk
@@ -74,6 +82,30 @@ def search(query_embedding: list[float], top_k: int) -> list[dict]:
         }
         for point in results.points
     ]
+
+
+def drop_collection() -> None:
+    """Delete the collection and all its points."""
+    client = get_client()
+    collections = [c.name for c in client.get_collections().collections]
+    if COLLECTION_NAME in collections:
+        client.delete_collection(collection_name=COLLECTION_NAME)
+
+
+def delete_by_source_file(source_key: str) -> None:
+    """Delete all points whose ``source`` payload field matches *source_key*."""
+    client = get_client()
+    collections = [c.name for c in client.get_collections().collections]
+    if COLLECTION_NAME not in collections:
+        return
+    client.delete(
+        collection_name=COLLECTION_NAME,
+        points_selector=FilterSelector(
+            filter=Filter(
+                must=[FieldCondition(key="source", match=MatchValue(value=source_key))]
+            )
+        ),
+    )
 
 
 def get_collection_info() -> dict | None:
