@@ -41,6 +41,7 @@ function TopBar({ step, onOpenTweaks }) {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               width: 26, height: 26, border: '1px solid var(--border)',
               background: 'transparent', color: 'var(--text-dim)', cursor: 'pointer',
+              borderRadius: 2,
             }}
           >
             <Icon name="cog" size={12} />

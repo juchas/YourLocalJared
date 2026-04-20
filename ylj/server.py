@@ -77,6 +77,11 @@ def _ensure_ollama_running(timeout_s: float = 8.0) -> bool:
     except (FileNotFoundError, OSError):
         return False
 
+    # Edge case: if a previous `ollama serve` is alive but temporarily
+    # unresponsive, the new Popen will die on EADDRINUSE immediately and
+    # the polling loop will time out against the stuck original process —
+    # resulting in a misleading "Could not start" error even though Ollama
+    # is installed. Low probability; no special handling, just documented.
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if ollama_status_check().get("running"):
@@ -283,13 +288,12 @@ def apply_setup(config: SetupConfig, request: Request):
             # The installer drops `ollama` on $PATH but doesn't start the
             # daemon; without this, the pull below fails with "could not
             # connect to ollama server" on a brand-new install.
-            if not ollama_status_check().get("running"):
-                _setup_status["message"] = "Starting Ollama daemon..."
-                if not _ensure_ollama_running():
-                    raise RuntimeError(
-                        "Could not start the Ollama daemon. Run `ollama serve` "
-                        "in another terminal and retry."
-                    )
+            _setup_status["message"] = "Starting Ollama daemon..."
+            if not _ensure_ollama_running():
+                raise RuntimeError(
+                    "Could not start the Ollama daemon. Run `ollama serve` "
+                    "in another terminal and retry."
+                )
 
             # LLM: skip the pull if Ollama already has the tag.
             already_pulled = config.llm_model in ollama_status_check().get("models", [])
