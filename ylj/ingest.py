@@ -172,14 +172,20 @@ def ingest_stream(
 ) -> Iterator[dict]:
     """Run the ingest pipeline, yielding progress events.
 
+    Per-file parse errors are isolated: one unparseable file (e.g. an
+    encrypted PDF, a locked XLSX) yields a ``skip`` event and the run
+    continues. Only errors in the pipeline itself (embedding model,
+    vector store, enumeration) terminate with an ``error`` event.
     Event shapes:
         {"phase": "rebuild", "reason": str}                # only when rebuild triggers
         {"phase": "scan",    "total_files": int, "skipped": int, "orphans": int}
         {"phase": "prune",   "file": str, "deleted": int}  # zero or more
         {"phase": "parse",   "file": str, "chunks": int, "ms": int, "files_done": int}
+        {"phase": "skip",    "file": str, "reason": str, "files_done": int}
         {"phase": "embed",   "chunks_done": int}
         {"phase": "store",   "chunks_done": int}
-        {"phase": "done",    "files": int, "chunks": int, "skipped": int, "pruned": int}
+        {"phase": "done",    "files": int, "chunks": int, "skipped": int, "pruned": int,
+         "failed": int}
         {"phase": "error",   "message": str}
 
     Where ``total_files`` counts only files that will actually be processed
@@ -242,6 +248,7 @@ def ingest_stream(
                 "chunks": 0,
                 "skipped": len(to_skip),
                 "pruned": pruned,
+                "failed": 0,
             }
             return
 
@@ -249,6 +256,7 @@ def ingest_stream(
 
         buffer: list = []
         total_chunks = 0
+        failed = 0
 
         def flush():
             """Embed + upsert whatever's in `buffer`, yielding phase events."""
@@ -272,8 +280,22 @@ def ingest_stream(
                 delete_by_source_file(key)
 
             t0 = time.perf_counter()
-            raw = parse_document(path)
-            chunked = split_chunks(raw)
+            # Isolate parse failures so one bad file (encrypted PDF,
+            # locked spreadsheet, corrupted archive) doesn't take the
+            # rest of the corpus down with it.
+            try:
+                raw = parse_document(path)
+                chunked = split_chunks(raw)
+            except Exception as e:
+                failed += 1
+                yield {
+                    "phase": "skip",
+                    "file": key,
+                    "reason": f"{type(e).__name__}: {e}",
+                    "files_done": idx,
+                }
+                continue
+
             buffer.extend(chunked)
             total_chunks += len(chunked)
 
@@ -310,10 +332,11 @@ def ingest_stream(
 
         yield {
             "phase": "done",
-            "files": len(to_process),
+            "files": len(to_process) - failed,
             "chunks": total_chunks,
             "skipped": len(to_skip),
             "pruned": pruned,
+            "failed": failed,
         }
     except Exception as e:
         # Intentionally don't write the manifest on error — the next run
@@ -341,15 +364,21 @@ def ingest(directory: Path, *, rebuild: bool = False) -> None:
             print(f"  pruned {ev['file']}")
         elif phase == "parse":
             print(f"  [{ev['files_done']}] {ev['file']} → {ev['chunks']} chunks ({ev['ms']}ms)")
+        elif phase == "skip":
+            print(f"  [{ev['files_done']}] skipped {ev['file']}: {ev['reason']}")
         elif phase == "embed" and last_phase != "embed":
             print(f"Embedding chunks (batch starts at {ev.get('chunks_done', 0)})...")
         elif phase == "store" and last_phase != "store":
             print("Storing chunks...")
         elif phase == "done":
-            print(
-                f"Done: {ev.get('files', 0)} files, {ev.get('chunks', 0)} chunks, "
-                f"{ev.get('skipped', 0)} skipped, {ev.get('pruned', 0)} pruned."
-            )
+            parts = [f"{ev.get('files', 0)} files", f"{ev.get('chunks', 0)} chunks"]
+            if ev.get("skipped"):
+                parts.append(f"{ev['skipped']} unchanged")
+            if ev.get("pruned"):
+                parts.append(f"{ev['pruned']} pruned")
+            if ev.get("failed"):
+                parts.append(f"{ev['failed']} failed")
+            print("Done: " + ", ".join(parts) + ".")
         elif phase == "error":
             print(f"Error: {ev['message']}")
             errored = True
