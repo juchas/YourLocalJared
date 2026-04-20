@@ -57,10 +57,11 @@ function savePrefs(p) {
 // React hook used by app.jsx / chat-app.jsx.
 function usePrefs() {
   const [prefs, set] = useState(loadPrefs);
-  useEffect(() => { applyPrefs(prefs); }, []);
   const update = (patch) => {
-    const next = savePrefs({ ...prefs, ...patch });
-    set(next);
+    set(prev => {
+      const next = savePrefs({ ...prev, ...patch });
+      return next;
+    });
   };
   return [prefs, update];
 }
