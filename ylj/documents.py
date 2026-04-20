@@ -20,6 +20,16 @@ class Chunk:
     text: str
     source: str
     page: int | None = None
+    # Normalised absolute file path the chunk came from. Unlike `source`,
+    # this never carries XLSX's ``[Sheet]`` suffix — so incremental ingest
+    # can delete every chunk of a modified/removed file with a single
+    # filter on this key. Defaults to `source` for parsers that already
+    # store a clean path there (pdf/docx/pptx/txt/md/csv).
+    source_file: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_file is None:
+            self.source_file = self.source
 
 
 def parse_pdf(path: Path) -> list[Chunk]:
@@ -57,7 +67,11 @@ def parse_xlsx(path: Path) -> list[Chunk]:
             if row_text.strip():
                 rows.append(row_text)
         if rows:
-            chunks.append(Chunk(text="\n".join(rows), source=f"{path} [{sheet}]"))
+            chunks.append(Chunk(
+                text="\n".join(rows),
+                source=f"{path} [{sheet}]",
+                source_file=str(path),
+            ))
     return chunks
 
 
@@ -116,7 +130,12 @@ def split_chunks(chunks: list[Chunk]) -> list[Chunk]:
     for chunk in chunks:
         splits = splitter.split_text(chunk.text)
         for split in splits:
-            result.append(Chunk(text=split, source=chunk.source, page=chunk.page))
+            result.append(Chunk(
+                text=split,
+                source=chunk.source,
+                page=chunk.page,
+                source_file=chunk.source_file,
+            ))
     return result
 
 

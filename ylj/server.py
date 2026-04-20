@@ -333,15 +333,17 @@ def setup_status():
 class IngestRequest(BaseModel):
     folders: list[str]
     extensions: list[str] | None = None
+    rebuild: bool = False
 
 
 @app.post("/api/setup/ingest")
 def setup_ingest(body: IngestRequest, request: Request):
     """Stream real progress events from the ingest pipeline as ndjson.
 
-    Each newline-delimited JSON line is one event: scan / parse / embed /
-    store / done / error. The wizard's step-07 animation consumes these to
-    drive its phase indicator, file log, and counters."""
+    Each newline-delimited JSON line is one event: rebuild / scan / prune /
+    parse / embed / store / done / error. The wizard's step-07 animation
+    consumes these to drive its phase indicator, file log, and counters.
+    ``rebuild: true`` forces a full re-embed (drops manifest + collection)."""
     if not _is_loopback_request(request):
         raise HTTPException(status_code=403, detail="ingest endpoint is localhost only")
 
@@ -360,7 +362,7 @@ def setup_ingest(body: IngestRequest, request: Request):
     from ylj.ingest import ingest_stream
 
     def event_stream():
-        for ev in ingest_stream(safe_dirs, ext):
+        for ev in ingest_stream(safe_dirs, ext, rebuild=body.rebuild):
             yield (json.dumps(ev) + "\n").encode("utf-8")
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")

@@ -1,5 +1,6 @@
 # YourLocalJared
 qdrant_data/
+ingest_manifest.json
 models/
 .venv-openwebui/
 .webui_secret_key

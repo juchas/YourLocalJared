@@ -3,7 +3,15 @@
 import uuid
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    FilterSelector,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
 
 from ylj.config import COLLECTION_NAME, EMBEDDING_DIMENSION, QDRANT_PATH
 from ylj.documents import Chunk
@@ -41,7 +49,12 @@ def upsert_chunks(chunks: list[Chunk], embeddings: list[list[float]]):
         PointStruct(
             id=str(uuid.uuid4()),
             vector=embedding,
-            payload={"text": chunk.text, "source": chunk.source, "page": chunk.page},
+            payload={
+                "text": chunk.text,
+                "source": chunk.source,
+                "source_file": chunk.source_file or chunk.source,
+                "page": chunk.page,
+            },
         )
         for chunk, embedding in zip(chunks, embeddings)
     ]
@@ -84,3 +97,36 @@ def get_collection_info() -> dict | None:
         return {"name": COLLECTION_NAME, "points_count": info.points_count}
     except Exception:
         return None
+
+
+def delete_by_source_file(source_file: str) -> None:
+    """Remove every chunk for a given file from the collection.
+
+    Incremental ingest calls this before re-embedding a modified file
+    (so old chunks don't stick around) and when pruning a file that
+    no longer exists on disk. Safe to call when the collection is
+    empty or missing — it's a no-op in that case.
+    """
+    client = get_client()
+    collections = [c.name for c in client.get_collections().collections]
+    if COLLECTION_NAME not in collections:
+        return
+    client.delete(
+        collection_name=COLLECTION_NAME,
+        points_selector=FilterSelector(
+            filter=Filter(must=[
+                FieldCondition(
+                    key="source_file",
+                    match=MatchValue(value=source_file),
+                ),
+            ]),
+        ),
+    )
+
+
+def drop_collection() -> None:
+    """Delete the entire collection. Used by `ingest --rebuild`."""
+    client = get_client()
+    collections = [c.name for c in client.get_collections().collections]
+    if COLLECTION_NAME in collections:
+        client.delete_collection(collection_name=COLLECTION_NAME)
