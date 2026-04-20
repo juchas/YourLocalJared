@@ -8,24 +8,70 @@ A fully local RAG (Retrieval-Augmented Generation) chat that runs on your own ma
 
 ## Requirements
 
-- Python 3.10+
-- [Ollama](https://ollama.com) installed and running locally
-- ~10 GB of disk (for a 7B model) plus room for your documents
+- ~10 GB of disk (for a small model) plus room for your documents
+- Admin/sudo rights for the one-time install (Homebrew / apt / winget need them)
+- Internet connection during install
+
+Git, Python, and Ollama are **installed for you** on a clean VM by the bootstrap scripts below — you don't need them pre-installed.
 
 ## Install
 
+### One-paste install (clean VM)
+
+**macOS or Linux** — paste into Terminal:
+
 ```bash
-git clone https://github.com/juchas/YourLocalJared.git
-cd YourLocalJared
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/juchas/YourLocalJared/main/bootstrap.sh | bash
 ```
 
-The install script sets up a virtual environment, installs deps, checks that Ollama is present, and pre-downloads the default embedding model. It does not download an LLM — that happens in onboarding so you can pick what fits your hardware.
+**Windows** — paste into PowerShell:
+
+```powershell
+iex (irm https://raw.githubusercontent.com/juchas/YourLocalJared/main/bootstrap.ps1)
+```
+
+Both scripts:
+
+1. Install git, Python 3.12, and Ollama via the native package manager (Homebrew on macOS, apt/dnf/pacman on Linux, winget on Windows).
+2. Clone the repo to `~/YourLocalJared` (override with `YLJ_INSTALL_DIR`).
+3. Create a venv, install project deps, pre-fetch the default embedding model, and ping Ollama.
+
+End-to-end time on a fresh VM: ~8–12 min, most of it waiting on downloads. Every step is idempotent — re-running upgrades in place.
+
+### Already cloned the repo?
+
+```bash
+./install.sh           # macOS / Linux
+install.bat            # Windows
+```
+
+These are thin shims that call the same `bootstrap.sh` / `bootstrap.ps1`, but skip the clone step.
+
+### Already have Python 3.10+ and Ollama?
+
+Skip the bootstrap entirely — `install.py` handles the project setup alone:
+
+```bash
+python install.py
+```
 
 ## Run
 
 ```bash
+# macOS / Linux
 source .venv/bin/activate
+python start.py
+```
+
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+python start.py
+```
+
+```bat
+REM Windows cmd.exe
+.venv\Scripts\activate.bat
 python start.py
 ```
 
