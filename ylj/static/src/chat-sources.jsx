@@ -50,9 +50,22 @@ function SourcesPanel({ sources, onClose, focusIdx }) {
 
       <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-dimmer)', marginBottom: 6 }}>full path</div>
-        <div style={{ fontSize: 11.5, color: 'var(--text)', fontWeight: 500, wordBreak: 'break-all', marginBottom: 12, lineHeight: 1.5 }}>
+        <button
+          onClick={() => window.revealInFolder && window.revealInFolder(s.file)}
+          title={window.revealTooltip ? window.revealTooltip() : 'show in folder'}
+          style={{
+            display: 'block', width: '100%', textAlign: 'left', padding: 0,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            fontSize: 11.5, color: 'var(--text)', fontWeight: 500,
+            wordBreak: 'break-all', marginBottom: 12, lineHeight: 1.5,
+            textDecoration: 'underline', textDecorationColor: 'transparent',
+            transition: 'text-decoration-color 0.1s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.textDecorationColor = 'var(--accent-hi)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.textDecorationColor = 'transparent'; }}
+        >
           {s.file}
-        </div>
+        </button>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, background: 'var(--border)', border: '1px solid var(--border)' }}>
           {[['line', s.line], ['score', s.score.toFixed(2)], ['chunk', `#${sel+1}`]].map(([l,v])=>(
             <div key={l} style={{ background: 'var(--bg)', padding: '8px 10px' }}>
@@ -79,7 +92,13 @@ function SourcesPanel({ sources, onClose, focusIdx }) {
       </div>
 
       <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px', display: 'flex', gap: 6 }}>
-        <GhostButton iconLeft="external" style={{ flex: 1 }}>open file</GhostButton>
+        <GhostButton
+          iconLeft="folder"
+          style={{ flex: 1 }}
+          onClick={() => window.revealInFolder && window.revealInFolder(s.file)}
+        >
+          show in folder
+        </GhostButton>
         <GhostButton iconLeft="book" style={{ flex: 1 }}>cite</GhostButton>
       </div>
     </div>
