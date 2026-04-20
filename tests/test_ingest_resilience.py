@@ -35,6 +35,9 @@ def fakes(monkeypatch):
     upserts: list = []
     monkeypatch.setattr(ingest_mod, "get_embedding_model", lambda: _FakeEmbedder())
     monkeypatch.setattr(ingest_mod, "ensure_collection", lambda: None)
+    monkeypatch.setattr(ingest_mod, "get_collection_info", lambda: None)
+    monkeypatch.setattr(ingest_mod, "_save_manifest", lambda files: None)
+    monkeypatch.setattr(ingest_mod, "delete_by_source_file", lambda key: None)
     monkeypatch.setattr(
         ingest_mod,
         "upsert_chunks",
@@ -111,7 +114,11 @@ def test_parse_failure_counts_failed_but_emits_done(fakes, tmp_path, monkeypatch
 
     assert errors == []
     assert len(skipped) == 2
-    assert done[0] == {"phase": "done", "files": 0, "chunks": 0, "failed": 2}
+    d = done[0]
+    assert d["phase"] == "done"
+    assert d["files"] == 0
+    assert d["chunks"] == 0
+    assert d["failed"] == 2
     assert fakes["upserts"] == []  # nothing to store
 
 
