@@ -185,7 +185,8 @@ def ingest_stream(
         {"phase": "skip",    "file": str, "reason": str, "files_done": int}
         {"phase": "embed",   "chunks_done": int}
         {"phase": "store",   "chunks_done": int}
-        {"phase": "done",    "files": int, "chunks": int, "skipped": int, "pruned": int, "failed": int}
+        {"phase": "done",    "files": int, "chunks": int, "skipped": int, "pruned": int,
+         "failed": int}
         {"phase": "error",   "message": str}
 
     Where ``total_files`` counts only files that will actually be processed
