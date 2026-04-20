@@ -213,6 +213,7 @@ function App() {
       const r = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // stream: true is always set — the non-streaming path is API-only; the UI never uses it.
         body: JSON.stringify({ model: modelId, messages: wire, scopeId, k, stream: true }),
         signal: controller.signal,
       });
@@ -262,7 +263,9 @@ function App() {
       if (controller.signal.aborted) return;
       if (streamError) { pushErrorBubble(streamError); return; }
       if (!sawDone && !answer) { pushErrorBubble('empty stream'); return; }
-      commit(answer, sources, modelId);
+      // TCP drop after some tokens arrived: commit what we have with a visible marker.
+      const finalAnswer = sawDone ? answer : answer + '\n\n*⚠︎ response cut short — connection dropped mid-stream*';
+      commit(finalAnswer, sources, modelId);
     } catch (e) {
       if (thinkTimerRef.current) { clearTimeout(thinkTimerRef.current); thinkTimerRef.current = null; }
       if (controller.signal.aborted || e?.name === 'AbortError') return;

@@ -128,7 +128,7 @@ def generate_stream(
     / non-2xx so the UI can handle both code paths identically.
     """
     resolved_model = model or LLM_MODEL
-    payload = _stream_payload(question, context_chunks, resolved_model)
+    payload = _stream_payload(question, context_chunks, model)
     url = f"{OLLAMA_HOST.rstrip('/')}/api/chat"
 
     try:
@@ -137,15 +137,7 @@ def generate_stream(
         raise RuntimeError(f"Failed to create HTTP client: {e}") from e
 
     try:
-        try:
-            stream_ctx = client.stream("POST", url, json=payload)
-        except httpx.ConnectError as e:
-            raise RuntimeError(
-                f"Ollama daemon not reachable at {OLLAMA_HOST}. "
-                "Is it running? Try `ollama serve` or install from https://ollama.com."
-            ) from e
-
-        with stream_ctx as response:
+        with client.stream("POST", url, json=payload) as response:
             if response.status_code == 404:
                 raise RuntimeError(
                     f"Model '{resolved_model}' not pulled. "
@@ -174,6 +166,11 @@ def generate_stream(
                         yield content
                 if chunk.get("done") is True:
                     return
+    except httpx.ConnectError as e:
+        raise RuntimeError(
+            f"Ollama daemon not reachable at {OLLAMA_HOST}. "
+            "Is it running? Try `ollama serve` or install from https://ollama.com."
+        ) from e
     except httpx.HTTPError as e:
         raise RuntimeError(f"Ollama request failed: {e}") from e
     finally:
