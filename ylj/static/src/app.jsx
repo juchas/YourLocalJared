@@ -1,8 +1,6 @@
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "accent": "green",
-  "tone": "light",
-  "showStatusBar": true,
-  "uppercaseTitles": false
+  "showStatusBar": true
 }/*EDITMODE-END*/;
 
 function App() {
@@ -14,6 +12,7 @@ function App() {
   const [embId, setEmbId] = useState('');
   const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
   const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [prefs, setPrefs] = usePrefs();
   const [ollama, setOllama] = useState({ running: null, version: null, models: [] });
 
   useEffect(() => { localStorage.setItem('ylj-step', step); }, [step]);
@@ -130,7 +129,7 @@ function App() {
         { text: `${folders.filter(f=>f.selected).length} folders` },
         { text: `accent ${tweaks.accent}` },
       ]} />}
-      {tweaksOpen && <TweaksPanel tweaks={tweaks} setTweaks={setTweaks} onClose={() => setTweaksOpen(false)} />}
+      {tweaksOpen && <TweaksPanel tweaks={tweaks} setTweaks={setTweaks} prefs={prefs} setPrefs={setPrefs} onClose={() => setTweaksOpen(false)} />}
     </div>
   );
 }

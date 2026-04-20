@@ -1,5 +1,6 @@
-// Tweaks panel — optional floating controls
-function TweaksPanel({ tweaks, setTweaks, onClose }) {
+// Tweaks panel — optional floating controls. Accent colour (page-local)
+// + the shared PrefsSection (theme / font size / motion) from prefs.jsx.
+function TweaksPanel({ tweaks, setTweaks, prefs, setPrefs, onClose }) {
   const set = (k, v) => {
     setTweaks(t => ({ ...t, [k]: v }));
     window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [k]: v } }, '*');
@@ -47,32 +48,13 @@ function TweaksPanel({ tweaks, setTweaks, onClose }) {
             ))}
           </div>
         </div>
-        <div>
-          <div style={{ fontSize: 10, color: 'var(--text-dimmer)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>tone</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {['light', 'warm', 'cool'].map(t => (
-              <button key={t} onClick={() => set('tone', t)} style={{
-                flex: 1, padding: '6px 0', fontSize: 10,
-                background: tweaks.tone === t ? 'var(--accent-dim)' : 'var(--bg-hi)',
-                border: `1px solid ${tweaks.tone === t ? 'var(--accent-border)' : 'var(--border)'}`,
-                color: tweaks.tone === t ? 'var(--accent-hi)' : 'var(--text-dim)',
-                letterSpacing: '0.08em', textTransform: 'uppercase',
-              }}>{t}</button>
-            ))}
-          </div>
-        </div>
-        <div>
+        {prefs && setPrefs && <PrefsSection prefs={prefs} setPrefs={setPrefs} />}
+        {tweaks.showStatusBar !== undefined && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Check checked={tweaks.showStatusBar} onChange={v => set('showStatusBar', v)} />
             <span style={{ fontSize: 11, color: 'var(--text)' }}>show status bar</span>
           </div>
-        </div>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Check checked={tweaks.uppercaseTitles} onChange={v => set('uppercaseTitles', v)} />
-            <span style={{ fontSize: 11, color: 'var(--text)' }}>uppercase titles</span>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
