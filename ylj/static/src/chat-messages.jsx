@@ -31,7 +31,7 @@ function Messages({ conversation, onOpenSources, streaming }) {
         {conversation.messages.map((m, i) => (
           <Message key={m.id} m={m} idx={i} onOpenSources={onOpenSources} />
         ))}
-        {streaming && <StreamingMessage streaming={streaming} />}
+        {streaming && <StreamingMessage streaming={streaming} onOpenSources={onOpenSources} />}
       </div>
     </div>
   );
@@ -74,7 +74,11 @@ function Message({ m, idx, onOpenSources }) {
             <span>{m.meta.tokensPerSec} tok/s</span>
           </>}
         </div>
-        <MarkdownText text={m.text} />
+        <MarkdownText
+          text={m.text}
+          sourceCount={m.sources ? m.sources.length : 0}
+          onCite={(i) => m.sources && onOpenSources(m.sources, i)}
+        />
 
         {m.sources && m.sources.length > 0 && (
           <div style={{ marginTop: 14 }}>
@@ -144,7 +148,10 @@ function SourceRow({ s, idx, onOpen }) {
           onMouseEnter={(e) => { e.currentTarget.style.textDecorationColor = 'var(--accent-hi)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.textDecorationColor = 'transparent'; }}
         >
-          {s.file} <span style={{ color: 'var(--text-dimmer)', fontWeight: 400 }}>:{s.line}</span>
+          {s.file}
+          {s.page != null && (
+            <span style={{ color: 'var(--text-dimmer)', fontWeight: 400 }}> · p. {s.page}</span>
+          )}
         </button>
         <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {s.snippet}
@@ -162,24 +169,52 @@ function SourceRow({ s, idx, onOpen }) {
   );
 }
 
-function MarkdownText({ text }) {
-  // tiny markdown: bold **x** + inline `code` + paragraphs
+function MarkdownText({ text, sourceCount = 0, onCite }) {
+  // tiny markdown: bold **x** + inline `code` + [N] citation pills + paragraphs
   const parts = text.split(/\n\n+/);
   return (
     <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.7 }}>
       {parts.map((p, i) => (
         <p key={i} style={{ marginTop: i > 0 ? 12 : 0 }}>
-          {inlineMd(p)}
+          {inlineMd(p, { sourceCount, onCite })}
         </p>
       ))}
     </div>
   );
 }
-function inlineMd(s) {
+
+function CitationPill({ n, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      title={`jump to source ${n}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        minWidth: 20, height: 18, padding: '0 5px',
+        marginLeft: 2, marginRight: 2,
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+        lineHeight: 1,
+        color: 'var(--accent-hi)',
+        background: 'var(--accent-dim)',
+        border: '1px solid var(--accent-border)',
+        borderRadius: 2,
+        cursor: 'pointer',
+        verticalAlign: 'baseline',
+      }}
+    >
+      {n}
+    </button>
+  );
+}
+
+function inlineMd(s, opts = {}) {
+  const { sourceCount = 0, onCite } = opts;
   const out = [];
   let rest = s;
   let key = 0;
-  const re = /(\*\*[^*]+\*\*|`[^`]+`)/;
+  // Order in the alternation matters: bold / code first (they can't
+  // contain whitespace-adjacent digits like `[3]`), then citations.
+  const re = /(\*\*[^*]+\*\*|`[^`]+`|\[(\d+)\])/;
   while (rest.length) {
     const m = rest.match(re);
     if (!m) { out.push(rest); break; }
@@ -187,19 +222,30 @@ function inlineMd(s) {
     const tok = m[0];
     if (tok.startsWith('**')) {
       out.push(<strong key={key++} style={{ fontWeight: 700, color: 'var(--text)' }}>{tok.slice(2, -2)}</strong>);
-    } else {
+    } else if (tok.startsWith('`')) {
       out.push(<code key={key++} style={{
         fontFamily: 'var(--mono)', fontSize: '0.92em',
         background: 'var(--accent-dim)', color: 'var(--accent-hi)',
         padding: '1px 5px', borderRadius: 2, fontWeight: 500,
       }}>{tok.slice(1, -1)}</code>);
+    } else {
+      // [N] citation — render as pill if N is in range and we have a
+      // handler, else fall back to plain text so a stray [2024] in the
+      // model's output doesn't become a bogus button.
+      const n = parseInt(m[2], 10);
+      if (onCite && n >= 1 && n <= sourceCount) {
+        out.push(<CitationPill key={key++} n={n} onClick={() => onCite(n - 1)} />);
+      } else {
+        out.push(tok);
+      }
     }
     rest = rest.slice(m.index + tok.length);
   }
   return out;
 }
 
-function StreamingMessage({ streaming }) {
+function StreamingMessage({ streaming, onOpenSources }) {
+  const sources = streaming.sources || [];
   return (
     <div style={{ display: 'flex', gap: 12, animation: 'fadeIn 0.2s' }}>
       <div style={{ flexShrink: 0 }}><Logo size={20} /></div>
@@ -212,7 +258,11 @@ function StreamingMessage({ streaming }) {
           </span>
         </div>
         {streaming.text ? (
-          <MarkdownText text={streaming.text + '▌'} />
+          <MarkdownText
+            text={streaming.text + '▌'}
+            sourceCount={sources.length}
+            onCite={(i) => onOpenSources && onOpenSources(sources, i)}
+          />
         ) : (
           <div style={{ display: 'flex', gap: 4, padding: '8px 0' }}>
             {[0, 1, 2].map(i => (

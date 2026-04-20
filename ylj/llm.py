@@ -21,6 +21,11 @@ RAG_PROMPT_TEMPLATE = """\
 You are a helpful assistant. Answer the user's question based on the provided context.
 If the context doesn't contain enough information, say so honestly.
 
+When you use information from a context block, cite it inline using its
+number in square brackets, e.g. "the rate is 5% [1]" or "as noted in [2]".
+Use the exact numbering shown in the context blocks below. Only cite
+blocks you actually used; don't invent numbers.
+
 Context:
 {context}
 
@@ -30,12 +35,16 @@ Answer:"""
 
 
 def _format_context(context_chunks: list[dict]) -> str:
-    return "\n\n---\n\n".join(
-        f"[Source: {c['source']}"
-        + (f", Page {c['page']}" if c.get("page") else "")
-        + f"]\n{c['text']}"
-        for c in context_chunks
-    )
+    # Number each block so the model can refer to it inline with [N].
+    # The chat UI parses the same [N] markers and turns them into
+    # clickable pills pointing at the nth source.
+    parts = []
+    for i, c in enumerate(context_chunks, start=1):
+        header = f"[{i}] Source: {c['source']}"
+        if c.get("page"):
+            header += f", Page {c['page']}"
+        parts.append(f"{header}\n{c['text']}")
+    return "\n\n---\n\n".join(parts)
 
 
 def generate(question: str, context_chunks: list[dict], model: str | None = None) -> str:

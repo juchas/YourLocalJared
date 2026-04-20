@@ -441,6 +441,9 @@ def _source_id(file: str, page: int | None) -> str:
     return hashlib.sha1(f"{file}#{page}".encode()).hexdigest()[:8]
 
 
+SNIPPET_MAX_CHARS = 400
+
+
 def _decorate_sources(raw: list[dict]) -> list[dict]:
     return [
         {
@@ -448,7 +451,10 @@ def _decorate_sources(raw: list[dict]) -> list[dict]:
             "file": s["source"],
             "page": s.get("page"),
             "score": s.get("score"),
-            "snippet": None,
+            # Preview-sized snippet for the chat's sources panel. Keep it
+            # short so sending 3–10 sources over SSE doesn't balloon the
+            # payload; the LLM already saw the full chunk for generation.
+            "snippet": (s.get("text") or "")[:SNIPPET_MAX_CHARS].strip() or None,
         }
         for s in raw or []
     ]
