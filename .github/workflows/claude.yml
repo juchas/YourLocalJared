@@ -34,23 +34,15 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Minimal config. The earlier `prompt:` named a specific tool
+      # (`pull_request_review_write`) that isn't in the action's actual
+      # toolbox, and the earlier `claude_args: --allowedTools ...` guessed
+      # at MCP tool names. Both likely caused the permission-denial +
+      # silent-exit seen on PR #14. Dropping both lets the action use its
+      # built-in defaults, which are known to work (PR #9 proved it).
+      # show_full_output makes the next run's log diagnosable without
+      # rerun-in-debug gymnastics.
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # No `model:` pin — fall back to the action's default Sonnet.
-          # Opus 4.7 isn't in the action's catalog yet; re-pin once it is.
-          #
-          # Explicitly allow the GitHub review tools. Without this the
-          # agent hits `permission_denials_count: 1` when trying to
-          # submit a formal review and exits silently.
-          claude_args: >-
-            --allowedTools
-            mcp__github__create_pending_pull_request_review,mcp__github__add_pull_request_review_comment_to_pending_review,mcp__github__submit_pending_pull_request_review,mcp__github__create_pull_request_review,Bash(gh pr review:*)
-          prompt: |
-            When asked to review a pull request, post a formal GitHub
-            pull-request review with an explicit event
-            (APPROVE / REQUEST_CHANGES / COMMENT) and line-level inline
-            comments where appropriate — not a plain issue comment.
-
-            For any other request (fix X, answer a question, run a task),
-            respond however makes sense.
+          show_full_output: true
