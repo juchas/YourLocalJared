@@ -203,6 +203,62 @@ class ScanFolderRequest(BaseModel):
     path: str
 
 
+class RevealRequest(BaseModel):
+    path: str
+
+
+@app.post("/api/reveal")
+def reveal_endpoint(body: RevealRequest, request: Request):
+    """Open the OS file manager with the given path selected.
+
+    Triple-guarded:
+      1. Loopback-only — this spawns a subprocess based on a
+         user-supplied path, same as /api/setup/apply.
+      2. ``scanner.safe_home_path`` rejects anything outside $HOME
+         (path-traversal guard).
+      3. The path must appear in the ingest manifest — i.e. we only
+         reveal files the index already knows about, never an arbitrary
+         $HOME file. Keeps this from being a generic filesystem probe
+         if any future code path exposes it less carefully.
+    """
+    if not _is_loopback_request(request):
+        raise HTTPException(status_code=403, detail="reveal endpoint is localhost only")
+
+    try:
+        safe = scanner.safe_home_path(body.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # Manifest gate — never reveal arbitrary files, only indexed ones.
+    # Imported lazily so the import graph stays the same as before and
+    # the chat code path doesn't pay for this.
+    from ylj.ingest import load_manifest
+
+    manifest = load_manifest()
+    if str(safe) not in manifest:
+        raise HTTPException(
+            status_code=403,
+            detail="path is not in the ingest manifest",
+        )
+
+    if not safe.exists():
+        raise HTTPException(status_code=404, detail="file no longer exists on disk")
+
+    from ylj import reveal as reveal_mod
+
+    try:
+        reveal_mod.reveal_in_folder(safe)
+    except FileNotFoundError as e:
+        # The platform reveal command isn't on PATH (very rare — xdg-open
+        # missing on a headless Linux box, for instance).
+        raise HTTPException(
+            status_code=500,
+            detail=f"reveal command not available: {e}",
+        ) from e
+
+    return {"status": "ok"}
+
+
 @app.post("/api/setup/scan-folder")
 def scan_folder_endpoint(body: ScanFolderRequest):
     """Scan a user-provided path (must resolve under $HOME)."""

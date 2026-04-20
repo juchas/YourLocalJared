@@ -79,6 +79,10 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           setLog(l => [{
             t: stamp(),
             file: `pruned ${typeof ev.file === 'string' ? ev.file.split(/[\\/]/).slice(-2).join('/') : ''}`,
+            // Keep the full path so the log row can reveal it in the
+            // file manager. Pruned files won't exist on disk though, so
+            // don't offer reveal for them.
+            fullPath: null,
             chunks: 0, ms: 0, kind: 'prune',
           }, ...l].slice(0, 40));
           break;
@@ -90,7 +94,8 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
             ? ev.file.split(/[\\/]/).slice(-2).join('/')
             : '(unknown)';
           setLog(l => [{
-            t: stamp(), file: displayFile, chunks: ev.chunks | 0, ms: ev.ms | 0, kind: 'parse',
+            t: stamp(), file: displayFile, fullPath: typeof ev.file === 'string' ? ev.file : null,
+            chunks: ev.chunks | 0, ms: ev.ms | 0, kind: 'parse',
           }, ...l].slice(0, 40));
           break;
         }
@@ -385,19 +390,39 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
             const isPrune = l.kind === 'prune';
             const isRebuild = l.kind === 'rebuild';
             const isWarn = isSkip || isPrune;
+            const revealTitle = window.revealTooltip ? window.revealTooltip() : 'show in folder';
             return (
               <Row key={i} accent={isWarn ? 'var(--warn, #c97d17)' : 'var(--accent)'} style={{ animation: 'slideIn 0.2s' }}
                 title={isSkip ? l.reason : undefined}>
                 <span style={{ fontSize: 10, color: 'var(--text-faintest)', width: 36, fontVariantNumeric: 'tabular-nums' }}>{l.t}</span>
                 <Icon name={isSkip || isPrune ? 'x' : isRebuild ? 'cog' : 'check'} size={10} stroke={2.5}
                   style={{ color: isWarn ? 'var(--warn, #c97d17)' : 'var(--accent-hi)' }} />
-                <span style={{
-                  flex: 1, fontSize: 11,
-                  color: isWarn ? 'var(--text-dim)' : 'var(--text)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {l.file}{isSkip && <span style={{ color: 'var(--warn, #c97d17)', marginLeft: 8 }}>· {l.reason}</span>}
-                </span>
+                {l.fullPath ? (
+                  <button
+                    onClick={() => window.revealInFolder && window.revealInFolder(l.fullPath)}
+                    title={revealTitle}
+                    style={{
+                      flex: 1, textAlign: 'left', padding: 0, background: 'transparent',
+                      border: 'none', cursor: 'pointer',
+                      fontSize: 11, color: isWarn ? 'var(--text-dim)' : 'var(--text)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      textDecoration: 'underline', textDecorationColor: 'transparent',
+                      transition: 'text-decoration-color 0.1s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.textDecorationColor = 'var(--accent-hi)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.textDecorationColor = 'transparent'; }}
+                  >
+                    {l.file}
+                  </button>
+                ) : (
+                  <span style={{
+                    flex: 1, fontSize: 11,
+                    color: isWarn ? 'var(--text-dim)' : 'var(--text)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {l.file}{isSkip && <span style={{ color: 'var(--warn, #c97d17)', marginLeft: 8 }}>· {l.reason}</span>}
+                  </span>
+                )}
                 <span style={{ width: 70, textAlign: 'right', fontSize: 11, color: 'var(--accent-hi)', fontVariantNumeric: 'tabular-nums' }}>
                   {l.chunks > 0 ? `+${l.chunks}` : ''}
                 </span>

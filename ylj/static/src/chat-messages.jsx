@@ -119,6 +119,14 @@ function Message({ m, idx, onOpenSources }) {
 }
 
 function SourceRow({ s, idx, onOpen }) {
+  // File path click reveals the file in the OS file manager instead of
+  // opening the document itself (user preference). stopPropagation so it
+  // doesn't also fire the row-level onOpen which would re-focus sources.
+  const reveal = (e) => {
+    e.stopPropagation();
+    if (window.revealInFolder) window.revealInFolder(s.file);
+  };
+  const revealTitle = window.revealTooltip ? window.revealTooltip() : 'show in folder';
   return (
     <Row accent="var(--accent)" onClick={onOpen} style={{ padding: 0 }}>
       <span style={{ fontSize: 10, color: 'var(--text-dimmer)', width: 22, fontVariantNumeric: 'tabular-nums' }}>
@@ -126,12 +134,25 @@ function SourceRow({ s, idx, onOpen }) {
       </span>
       <Icon name="file" size={11} style={{ color: 'var(--accent-hi)' }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 11.5, color: 'var(--text)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <button
+          onClick={reveal}
+          title={revealTitle}
+          style={{
+            display: 'block', width: '100%', textAlign: 'left', padding: 0,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            fontSize: 11.5, color: 'var(--text)', fontWeight: 500,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            textDecoration: 'underline', textDecorationColor: 'transparent',
+            transition: 'text-decoration-color 0.1s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.textDecorationColor = 'var(--accent-hi)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.textDecorationColor = 'transparent'; }}
+        >
           {s.file}
           {s.page != null && (
             <span style={{ color: 'var(--text-dimmer)', fontWeight: 400 }}> · p. {s.page}</span>
           )}
-        </div>
+        </button>
         <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {s.snippet}
         </div>
