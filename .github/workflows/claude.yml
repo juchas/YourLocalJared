@@ -11,8 +11,12 @@ on:
     types: [opened, assigned]
 
 concurrency:
-  group: claude-code-${{ github.event.issue.number || github.event.pull_request.number || github.event.comment.id }}
-  cancel-in-progress: true
+  # Key by the specific event ID so each mention is its own run and
+  # nothing gets cancelled by a later mention on the same PR. Using
+  # `cancel-in-progress: true` with a PR-level key was killing runs
+  # mid-execution (seen on PR #14: 26s cancel).
+  group: claude-code-${{ github.event.comment.id || github.event.review.id || github.event.issue.number }}
+  cancel-in-progress: false
 
 jobs:
   claude:
