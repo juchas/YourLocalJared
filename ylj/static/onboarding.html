@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>(function(){try{var p=JSON.parse(localStorage.getItem('ylj-prefs')||'{}');var r=document.documentElement;if(p.theme==='dark'||(!p.theme&&window.matchMedia('(prefers-color-scheme: dark)').matches))r.dataset.theme='dark';if(p.fontSize)r.dataset.font=p.fontSize;if(p.motion==='reduced'||(!p.motion&&window.matchMedia('(prefers-reduced-motion: reduce)').matches))r.dataset.motion='reduced';}catch(_){}})();</script>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>YourLocalJared — Setup</title>
@@ -34,6 +35,35 @@
     --warn: #e8553b;
     --info: #3b82f6;
     --mono: 'JetBrains Mono', 'DM Mono', ui-monospace, monospace;
+  }
+  /* Dark theme — same var names, different values */
+  html[data-theme="dark"] {
+    --bg: #0b0b0d;
+    --bg-alt: #141418;
+    --bg-hi: #1c1c22;
+    --border: #26262d;
+    --border-hi: #34343c;
+    --text: #e8e8ec;
+    --text-dim: #a1a1a9;
+    --text-dimmer: #6e6e78;
+    --text-faintest: #3a3a42;
+    --ok: #22d672;
+    --warn: #ff6d54;
+    --info: #60a5fa;
+  }
+  html[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #34343c; }
+  html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #4a4a54; }
+  /* Font-size presets — drive the body font-size so child px/em tokens shift together */
+  html[data-font="compact"] body      { font-size: 11px; }
+  html[data-font="default"] body      { font-size: 12px; }
+  html[data-font="comfortable"] body  { font-size: 14px; }
+  /* Reduced motion — near-instant so layout still settles */
+  html[data-motion="reduced"] *,
+  html[data-motion="reduced"] *::before,
+  html[data-motion="reduced"] *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
@@ -90,6 +120,7 @@
 <script type="text/babel" data-presets="react" src="src/screens-ingest.jsx"></script>
 <script type="text/babel" data-presets="react" src="src/screens-test.jsx"></script>
 <script type="text/babel" data-presets="react" src="src/screens-handoff.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/prefs.jsx"></script>
 <script type="text/babel" data-presets="react" src="src/tweaks.jsx"></script>
 <script type="text/babel" data-presets="react" src="src/app.jsx"></script>
 </body>

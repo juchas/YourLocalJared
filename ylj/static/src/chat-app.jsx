@@ -13,14 +13,14 @@ const ACCENTS = {
   rose:   { hi: '#be185d', base: '#e11d48', row: '#e11d481a', bd: '#e11d4840', dim: '#e11d4812' },
 };
 
-function TweaksPanel({ tweaks, setTweaks, onClose }) {
+function TweaksPanel({ tweaks, setTweaks, prefs, setPrefs, onClose }) {
   const set = (k, v) => {
     setTweaks(t => ({ ...t, [k]: v }));
     window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [k]: v } }, '*');
   };
   return (
     <div style={{
-      position: 'fixed', bottom: 40, right: 20, width: 240, zIndex: 1000,
+      position: 'fixed', bottom: 40, right: 20, width: 260, zIndex: 1000,
       background: 'var(--bg)', border: '1px solid var(--border-hi)',
       boxShadow: '0 10px 30px rgba(0,0,0,0.08)',
     }}>
@@ -30,7 +30,7 @@ function TweaksPanel({ tweaks, setTweaks, onClose }) {
         <div style={{ flex: 1 }} />
         <button onClick={onClose} style={{ color: 'var(--text-dim)' }}><Icon name="x" size={11} /></button>
       </div>
-      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
           <div style={{ fontSize: 10, color: 'var(--text-dimmer)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>accent</div>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -42,6 +42,7 @@ function TweaksPanel({ tweaks, setTweaks, onClose }) {
             ))}
           </div>
         </div>
+        {prefs && setPrefs && <PrefsSection prefs={prefs} setPrefs={setPrefs} />}
         {[
           ['showSidebar', 'sidebar'],
           ['showSources', 'sources panel'],
@@ -100,6 +101,7 @@ function App() {
   const [k, setK] = useState(3);
   const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
   const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [prefs, setPrefs] = usePrefs();
 
   useEffect(() => { localStorage.setItem('ylj-chat', activeId); }, [activeId]);
 
@@ -312,7 +314,7 @@ function App() {
         <SourcesPanel sources={sourcesFor} onClose={() => setSourcesOpen(false)} focusIdx={sourcesFocus} />
       )}
 
-      {tweaksOpen && <TweaksPanel tweaks={tweaks} setTweaks={setTweaks} onClose={() => setTweaksOpen(false)} />}
+      {tweaksOpen && <TweaksPanel tweaks={tweaks} setTweaks={setTweaks} prefs={prefs} setPrefs={setPrefs} onClose={() => setTweaksOpen(false)} />}
     </div>
   );
 }
