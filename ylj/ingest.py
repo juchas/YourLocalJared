@@ -176,7 +176,6 @@ def ingest_stream(
     encrypted PDF, a locked XLSX) yields a ``skip`` event and the run
     continues. Only errors in the pipeline itself (embedding model,
     vector store, enumeration) terminate with an ``error`` event.
-
     Event shapes:
         {"phase": "rebuild", "reason": str}                # only when rebuild triggers
         {"phase": "scan",    "total_files": int, "skipped": int, "orphans": int}
