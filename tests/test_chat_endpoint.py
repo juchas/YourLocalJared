@@ -8,12 +8,15 @@ installed in CI via `pip install -e .[dev]`.
 """
 
 import json
+from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from ylj import server
+from ylj.llm import generate_stream
 from ylj.server import ChatRequest, Message
 
 
@@ -152,6 +155,65 @@ def test_chat_stream_error_event_reaches_client(monkeypatch):
     assert resp.status_code == 200
     events = _parse_sse(resp.content)
     assert events[-1] == {"event": "error", "message": "Ollama daemon not reachable"}
+
+
+# ── generate_stream unit tests ──────────────────────────────────────────────
+
+
+def _mock_stream_client(lines, status_code=200):
+    """Return a mock httpx.Client whose stream() context manager serves NDJSON lines."""
+    mock_response = MagicMock()
+    mock_response.status_code = status_code
+    mock_response.iter_lines.return_value = iter(lines)
+    mock_response.read.return_value = b"error body"
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_response
+    mock_ctx.__exit__.return_value = False
+
+    mock_client = MagicMock()
+    mock_client.stream.return_value = mock_ctx
+    return mock_client
+
+
+def test_generate_stream_yields_tokens():
+    lines = [
+        json.dumps({"message": {"content": "hel"}}),
+        json.dumps({"message": {"content": "lo"}}),
+        json.dumps({"done": True}),
+    ]
+    with patch("ylj.llm.httpx.Client", return_value=_mock_stream_client(lines)):
+        tokens = list(generate_stream("hi", []))
+    assert tokens == ["hel", "lo"]
+
+
+def test_generate_stream_skips_malformed_ndjson():
+    lines = [
+        "not-json{{",
+        json.dumps({"message": {"content": "ok"}}),
+        json.dumps({"done": True}),
+    ]
+    with patch("ylj.llm.httpx.Client", return_value=_mock_stream_client(lines)):
+        tokens = list(generate_stream("hi", []))
+    assert tokens == ["ok"]
+
+
+def test_generate_stream_raises_on_404():
+    with patch("ylj.llm.httpx.Client", return_value=_mock_stream_client([], status_code=404)):
+        with pytest.raises(RuntimeError, match="not pulled"):
+            list(generate_stream("hi", [], model="no-such-model"))
+
+
+def test_generate_stream_raises_on_connect_error():
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.side_effect = httpx.ConnectError("connection refused")
+    mock_ctx.__exit__.return_value = False
+    mock_client = MagicMock()
+    mock_client.stream.return_value = mock_ctx
+
+    with patch("ylj.llm.httpx.Client", return_value=mock_client):
+        with pytest.raises(RuntimeError, match="daemon not reachable"):
+            list(generate_stream("hi", []))
 
 
 def test_chat_non_streaming_path_still_works(monkeypatch):
