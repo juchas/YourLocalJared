@@ -249,6 +249,10 @@ function App() {
           if (ev.event === 'retrieval') {
             sources = Array.isArray(ev.sources) ? ev.sources : [];
             setSourcesFor(sources);
+            // Thread sources into the streaming state so [N] citation
+            // pills can resolve their click target while tokens are
+            // still arriving.
+            setStreaming(s => s && { ...s, sources });
           } else if (ev.event === 'token' && typeof ev.text === 'string') {
             answer += ev.text;
             setStreaming(s => s && { ...s, phase: 'streaming', text: answer });
