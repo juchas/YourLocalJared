@@ -20,6 +20,16 @@ class Chunk:
     text: str
     source: str
     page: int | None = None
+    # Normalised absolute file path the chunk came from. Unlike `source`,
+    # this never carries XLSX's ``[Sheet]`` suffix — so incremental ingest
+    # can delete every chunk of a modified/removed file with a single
+    # filter on this key. Defaults to `source` for parsers that already
+    # store a clean path there (pdf/docx/pptx/txt/md/csv).
+    source_file: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_file is None:
+            self.source_file = self.source
 
 
 def parse_pdf(path: Path) -> list[Chunk]:
@@ -45,19 +55,53 @@ def parse_docx(path: Path) -> list[Chunk]:
 
 
 def parse_xlsx(path: Path) -> list[Chunk]:
+    """Chunk a workbook by row-group, not whole-sheet.
+
+    The old implementation concatenated every row of a sheet into one
+    giant text blob that ``split_chunks`` then shredded into thousands
+    of ~500-char fragments with arbitrary row boundaries. A data-heavy
+    workbook could easily produce 30 k+ chunks from a single file, which
+    swamps the embed/store loop and produces garbled retrieval hits.
+
+    Instead, accumulate rows until the running length reaches
+    ``CHUNK_SIZE`` chars and emit that as a single chunk. Result:
+      * chunk count is bounded by content_chars / CHUNK_SIZE
+      * row boundaries are preserved (no mid-row splits)
+      * retrieved chunks read like coherent row groups
+    ``split_chunks`` is still run over the output for the rare chunk
+    that ends up longer than the target after the final row is added.
+    """
     from openpyxl import load_workbook
 
     wb = load_workbook(path, read_only=True, data_only=True)
-    chunks = []
+    chunks: list[Chunk] = []
     for sheet in wb.sheetnames:
         ws = wb[sheet]
-        rows = []
+        buf: list[str] = []
+        buf_len = 0
+        source = f"{path} [{sheet}]"
+
+        def _emit() -> None:
+            nonlocal buf, buf_len
+            if not buf:
+                return
+            chunks.append(Chunk(
+                text="\n".join(buf),
+                source=source,
+                source_file=str(path),
+            ))
+            buf = []
+            buf_len = 0
+
         for row in ws.iter_rows(values_only=True):
-            row_text = " | ".join(str(c) for c in row if c is not None)
-            if row_text.strip():
-                rows.append(row_text)
-        if rows:
-            chunks.append(Chunk(text="\n".join(rows), source=f"{path} [{sheet}]"))
+            row_text = " | ".join(str(c) for c in row if c is not None).strip()
+            if not row_text:
+                continue
+            buf.append(row_text)
+            buf_len += len(row_text) + 1  # +1 for the joining newline
+            if buf_len >= CHUNK_SIZE:
+                _emit()
+        _emit()
     return chunks
 
 
@@ -116,7 +160,12 @@ def split_chunks(chunks: list[Chunk]) -> list[Chunk]:
     for chunk in chunks:
         splits = splitter.split_text(chunk.text)
         for split in splits:
-            result.append(Chunk(text=split, source=chunk.source, page=chunk.page))
+            result.append(Chunk(
+                text=split,
+                source=chunk.source,
+                page=chunk.page,
+                source_file=chunk.source_file,
+            ))
     return result
 
 

@@ -31,8 +31,9 @@ def test_setup_ingest_streams_ndjson(monkeypatch, tmp_path):
         _ev("done", files=2, chunks=3),
     ]
 
-    def fake_ingest_stream(dirs, ext):
+    def fake_ingest_stream(dirs, ext, *, rebuild=False):
         assert dirs == [tmp_path]
+        assert rebuild is False  # default when the field is omitted
         yield from fake_events
 
     # ingest is imported lazily inside the endpoint, so monkeypatch the
@@ -85,6 +86,33 @@ def test_setup_ingest_rejects_unsafe_path(monkeypatch):
     )
     assert r.status_code == 400
     assert "unsafe path" in r.json()["detail"]
+
+
+def test_setup_ingest_forwards_rebuild_flag(monkeypatch, tmp_path):
+    """POST body `rebuild: true` must reach `ingest_stream` as a kwarg."""
+    monkeypatch.setattr(server, "_is_loopback_request", lambda _r: True)
+    monkeypatch.setattr(server.scanner, "safe_home_path", lambda p: tmp_path)
+
+    captured = {}
+
+    def spy_stream(dirs, ext, *, rebuild=False):
+        captured["rebuild"] = rebuild
+        yield _ev("done", files=0, chunks=0, skipped=0, pruned=0)
+
+    import ylj.ingest
+
+    monkeypatch.setattr(ylj.ingest, "ingest_stream", spy_stream)
+
+    client = TestClient(server.app)
+    with client.stream(
+        "POST",
+        "/api/setup/ingest",
+        json={"folders": [str(tmp_path)], "extensions": [".md"], "rebuild": True},
+    ) as r:
+        assert r.status_code == 200
+        _ = b"".join(r.iter_bytes())
+
+    assert captured == {"rebuild": True}
 
 
 def test_setup_apply_rejects_non_loopback(monkeypatch):
