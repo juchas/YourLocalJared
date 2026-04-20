@@ -333,6 +333,21 @@ function App() {
           }}>
             <Icon name="book" size={10} /> sources {sourcesFor ? sourcesFor.length : 0}
           </button>
+          <button
+            onClick={() => setTweaksOpen(v => !v)}
+            title="Preferences (theme, font size, motion)"
+            aria-label="Open preferences"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 26, height: 26,
+              color: tweaksOpen ? 'var(--accent-hi)' : 'var(--text-dim)',
+              border: `1px solid ${tweaksOpen ? 'var(--accent-border)' : 'var(--border)'}`,
+              background: tweaksOpen ? 'var(--accent-dim)' : 'transparent',
+              cursor: 'pointer',
+            }}
+          >
+            <Icon name="cog" size={12} />
+          </button>
         </div>
 
         <Messages conversation={conversation} onOpenSources={openSources} streaming={streaming} />

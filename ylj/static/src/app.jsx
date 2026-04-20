@@ -113,7 +113,7 @@ function App() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-      <TopBar step={step} />
+      <TopBar step={step} onOpenTweaks={() => setTweaksOpen(true)} />
       <StepStrip step={step} onStep={go} />
       <div key={step} style={{ flex: 1, display: 'flex', flexDirection: 'column', animation: 'fadeIn 0.18s', minHeight: 0 }}>
         {screen}
