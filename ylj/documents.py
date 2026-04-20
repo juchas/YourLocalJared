@@ -55,23 +55,53 @@ def parse_docx(path: Path) -> list[Chunk]:
 
 
 def parse_xlsx(path: Path) -> list[Chunk]:
+    """Chunk a workbook by row-group, not whole-sheet.
+
+    The old implementation concatenated every row of a sheet into one
+    giant text blob that ``split_chunks`` then shredded into thousands
+    of ~500-char fragments with arbitrary row boundaries. A data-heavy
+    workbook could easily produce 30 k+ chunks from a single file, which
+    swamps the embed/store loop and produces garbled retrieval hits.
+
+    Instead, accumulate rows until the running length reaches
+    ``CHUNK_SIZE`` chars and emit that as a single chunk. Result:
+      * chunk count is bounded by content_chars / CHUNK_SIZE
+      * row boundaries are preserved (no mid-row splits)
+      * retrieved chunks read like coherent row groups
+    ``split_chunks`` is still run over the output for the rare chunk
+    that ends up longer than the target after the final row is added.
+    """
     from openpyxl import load_workbook
 
     wb = load_workbook(path, read_only=True, data_only=True)
-    chunks = []
+    chunks: list[Chunk] = []
     for sheet in wb.sheetnames:
         ws = wb[sheet]
-        rows = []
-        for row in ws.iter_rows(values_only=True):
-            row_text = " | ".join(str(c) for c in row if c is not None)
-            if row_text.strip():
-                rows.append(row_text)
-        if rows:
+        buf: list[str] = []
+        buf_len = 0
+        source = f"{path} [{sheet}]"
+
+        def _emit() -> None:
+            nonlocal buf, buf_len
+            if not buf:
+                return
             chunks.append(Chunk(
-                text="\n".join(rows),
-                source=f"{path} [{sheet}]",
+                text="\n".join(buf),
+                source=source,
                 source_file=str(path),
             ))
+            buf = []
+            buf_len = 0
+
+        for row in ws.iter_rows(values_only=True):
+            row_text = " | ".join(str(c) for c in row if c is not None).strip()
+            if not row_text:
+                continue
+            buf.append(row_text)
+            buf_len += len(row_text) + 1  # +1 for the joining newline
+            if buf_len >= CHUNK_SIZE:
+                _emit()
+        _emit()
     return chunks
 
 

@@ -20,6 +20,7 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
   const [totalFiles, setTotalFiles] = useState(Math.max(1, Math.floor(estimatedFiles)));
   const [filesProcessed, setFilesProcessed] = useState(0);
   const [chunks, setChunks] = useState(0);
+  const [chunksDone, setChunksDone] = useState(0);
   const [skipped, setSkipped] = useState(0);
   const [orphans, setOrphans] = useState(0);
   const [pruned, setPruned] = useState(0);
@@ -48,6 +49,7 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
     setPhaseIdx(0);
     setFilesProcessed(0);
     setChunks(0);
+    setChunksDone(0);
     setSkipped(0);
     setOrphans(0);
     setPruned(0);
@@ -92,14 +94,19 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
         }
         case 'embed':
           setPhaseIdx(i => Math.max(i, phaseIndex.embed));
+          if (typeof ev.chunks_done === 'number') setChunksDone(ev.chunks_done);
           break;
         case 'store':
           setPhaseIdx(i => Math.max(i, phaseIndex.store));
+          if (typeof ev.chunks_done === 'number') setChunksDone(ev.chunks_done);
           break;
         case 'done':
           setPhaseIdx(phaseIndex.store);
           if (typeof ev.files === 'number') setFilesProcessed(ev.files);
-          if (typeof ev.chunks === 'number') setChunks(ev.chunks);
+          if (typeof ev.chunks === 'number') {
+            setChunks(ev.chunks);
+            setChunksDone(ev.chunks);
+          }
           if (typeof ev.skipped === 'number') setSkipped(ev.skipped);
           if (typeof ev.pruned === 'number') setPruned(ev.pruned);
           setDone(true);
@@ -190,10 +197,24 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
   // total_files is "files to process this run" — when everything was
   // already up to date it's 0 and we'd divide by zero. Count skipped
   // files as implicitly done so the ring lands on 100% in that case.
-  const denom = totalFiles + skipped;
-  const numerator = filesProcessed + skipped;
-  const pct = denom > 0 ? Math.min(100, (numerator / denom) * 100) : (done ? 100 : 0);
-  const displayPct = done && !error ? 100 : pct;
+  const fileDenom = totalFiles + skipped;
+  const fileNumer = filesProcessed + skipped;
+  const filePct = fileDenom > 0 ? (fileNumer / fileDenom) * 100 : (done ? 100 : 0);
+
+  // Blend file-level progress with intra-file chunk progress so the
+  // ring keeps moving during the embed/store tail of a big file (e.g.
+  // a spreadsheet that balloons into tens of thousands of chunks).
+  // `chunksDone` comes from embed/store events; `chunks` is the
+  // running total the parse phase has accumulated so far. When we're
+  // mid-file, chunksDone/chunks interpolates between filesProcessed
+  // and filesProcessed+1 on the file-denominator axis.
+  let pct = filePct;
+  if (!done && chunks > 0 && chunksDone > 0 && chunksDone < chunks && fileDenom > 0) {
+    const frac = chunksDone / chunks;           // 0..1 across chunks seen so far
+    const step = (1 / fileDenom) * 100;         // one file's share of the ring
+    pct = Math.min(100, filePct + step * frac);
+  }
+  const displayPct = done && !error ? 100 : Math.min(100, pct);
   const SZ = 180;
   const R = (SZ - 16) / 2;
   const C = 2 * Math.PI * R;
@@ -232,7 +253,13 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--border)', border: '1px solid var(--border)', marginBottom: 18 }}>
               {[
                 ['files', `${filesProcessed.toLocaleString()} / ${totalFiles.toLocaleString()}`],
-                ['chunks', chunks.toLocaleString()],
+                // Show chunks_done / chunks_parsed while embed+store are
+                // chewing through a big file; falls back to the running
+                // total once we've stored everything.
+                ['chunks',
+                  (!done && chunks > 0 && chunksDone > 0 && chunksDone < chunks)
+                    ? `${chunksDone.toLocaleString()} / ${chunks.toLocaleString()}`
+                    : chunks.toLocaleString()],
                 ['elapsed', `${(elapsedMs / 1000).toFixed(1)}s`],
                 ['phase', phases[phaseIdx]],
               ].map(([l, v]) => (
