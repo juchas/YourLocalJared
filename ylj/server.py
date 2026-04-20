@@ -27,7 +27,7 @@ from ylj import scanner
 from ylj.config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, LLM_MODEL, SERVER_HOST, SERVER_PORT
 from ylj.llm import status as ollama_status_check
 from ylj.probe import probe as probe_hardware
-from ylj.rag import query
+from ylj.rag import query, query_stream
 
 
 def _resolve_ollama() -> str:
@@ -306,26 +306,15 @@ class ChatRequest(BaseModel):
     messages: list[Message]
     model: str | None = None
     k: int | None = None
+    stream: bool = False
 
 
 def _source_id(file: str, page: int | None) -> str:
     return hashlib.sha1(f"{file}#{page}".encode()).hexdigest()[:8]
 
 
-@app.post("/api/chat")
-def chat(request: ChatRequest):
-    """Answer the last user message using local RAG + Ollama."""
-    user_messages = [m for m in request.messages if m.role == "user"]
-    if not user_messages:
-        raise HTTPException(status_code=400, detail="no user message")
-
-    model = request.model or LLM_MODEL
-    try:
-        result = query(user_messages[-1].content, top_k=request.k, model=model)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    sources = [
+def _decorate_sources(raw: list[dict]) -> list[dict]:
+    return [
         {
             "id": _source_id(s["source"], s.get("page")),
             "file": s["source"],
@@ -333,11 +322,58 @@ def chat(request: ChatRequest):
             "score": s.get("score"),
             "snippet": None,
         }
-        for s in result.get("sources", [])
+        for s in raw or []
     ]
+
+
+def _sse_encode(event: dict) -> bytes:
+    return f"data: {json.dumps(event)}\n\n".encode("utf-8")
+
+
+@app.post("/api/chat")
+def chat(request: ChatRequest):
+    """Answer the last user message using local RAG + Ollama.
+
+    Non-streaming by default. When ``stream: true`` is set, returns an
+    SSE stream of `retrieval` / `token` / `done` / `error` events so the
+    chat UI can render tokens live.
+    """
+    user_messages = [m for m in request.messages if m.role == "user"]
+    if not user_messages:
+        raise HTTPException(status_code=400, detail="no user message")
+
+    question = user_messages[-1].content
+    model = request.model or LLM_MODEL
+
+    if request.stream:
+        def _iter():
+            try:
+                for ev in query_stream(question, top_k=request.k, model=model):
+                    if ev.get("event") == "retrieval":
+                        ev = {**ev, "sources": _decorate_sources(ev.get("sources", []))}
+                    yield _sse_encode(ev)
+            except Exception as e:
+                # Any exception that escapes query_stream still gets surfaced
+                # to the UI as an event rather than a dropped connection.
+                yield _sse_encode({"event": "error", "message": str(e)})
+
+        return StreamingResponse(
+            _iter(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    try:
+        result = query(question, top_k=request.k, model=model)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
     return {
         "answer": result.get("answer", ""),
-        "sources": sources,
+        "sources": _decorate_sources(result.get("sources", [])),
         "model": model,
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
