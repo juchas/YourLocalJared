@@ -116,16 +116,16 @@ if ($inRepo) {
     Ok "Running from inside the cloned repo at $RepoDir — skipping git clone"
 } elseif (Test-Path (Join-Path $InstallDir '.git')) {
     Info "Repo already cloned at $InstallDir — fetching latest main…"
-    git -C $InstallDir fetch origin main --quiet
-    git -C $InstallDir checkout main --quiet
-    try { git -C $InstallDir pull --ff-only origin main --quiet } catch { Warn "git pull reported no fast-forward" }
+    git -C "$InstallDir" fetch origin main --quiet
+    git -C "$InstallDir" checkout main --quiet
+    try { git -C "$InstallDir" pull --ff-only origin main --quiet } catch { Warn "git pull reported no fast-forward" }
     $RepoDir = $InstallDir
     Ok "Updated existing clone at $RepoDir"
 } else {
     Info "Cloning $RepoUrl into $InstallDir…"
     $parent = Split-Path $InstallDir -Parent
     if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-    git clone --depth=1 $RepoUrl $InstallDir
+    git clone --depth=1 $RepoUrl "$InstallDir"
     $RepoDir = $InstallDir
     Ok "Cloned to $RepoDir"
 }
