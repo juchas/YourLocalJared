@@ -20,7 +20,10 @@
 # Re-runnable: every step is idempotent.
 
 param(
-    [ValidateSet('system','user','')] [string] $Mode = ''
+    [ValidateSet('system','user','')] [string] $Mode = '',
+    # Skip the disclaimer and the countdown. Intended for CI / automation
+    # only — the interactive install always shows the disclaimer.
+    [switch] $Yes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,6 +64,79 @@ function Refresh-Path {
     $user    = [Environment]::GetEnvironmentVariable('Path', 'User')
     $env:Path = "$machine;$user"
 }
+
+# ── Disclaimer ──────────────────────────────────────────────────────
+# Every interactive run shows the disclaimer; we deliberately don't
+# persist an "accepted" marker so users re-consent on every install.
+# The countdown exists so "spam Enter to dismiss" isn't a viable way
+# to skip reading — Accept/Decline only unlock after $ReadDelay seconds.
+$ReadDelay = 8
+
+function Show-DisclaimerAndRequireAccept {
+    $skip = $Yes.IsPresent -or $env:YLJ_SKIP_DISCLAIMER
+    if ($skip) {
+        Info "Disclaimer skipped (-Yes / YLJ_SKIP_DISCLAIMER set)."
+        return
+    }
+    $haveConsole = $false
+    try { $haveConsole = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected } catch { $haveConsole = $false }
+    if (-not $haveConsole) {
+        Info "No interactive console; skipping disclaimer. Re-run interactively to review it."
+        return
+    }
+
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════" -ForegroundColor White
+    Write-Host "  YourLocalJared — please read before continuing" -ForegroundColor White
+    Write-Host "═══════════════════════════════════════════════════════════════════" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  This installer will:"
+    Write-Host ""
+    Write-Host "    1. Install git, Python 3.12, and Ollama — via winget (with admin)"
+    Write-Host "       or into %LOCALAPPDATA%\YourLocalJared\ (without admin)."
+    Write-Host "    2. Clone YourLocalJared to $InstallDir."
+    Write-Host "    3. Create a Python venv, install project dependencies, and"
+    Write-Host "       pre-download a ~140 MB embedding model from Hugging Face."
+    Write-Host "    4. Pull a local LLM via Ollama (~2–15 GB depending on which"
+    Write-Host "       one you pick in the onboarding wizard)."
+    Write-Host "    5. Start a server at http://localhost:8000. You choose which"
+    Write-Host "       folders on this machine the tool will index. Those files"
+    Write-Host "       are chunked, embedded, and stored in .\qdrant_data\ next"
+    Write-Host "       to the repo."
+    Write-Host ""
+    Write-Host "  Nothing you index, query, or say in chat leaves this machine." -ForegroundColor White
+    Write-Host "  All inference runs against your local Ollama daemon."
+    Write-Host ""
+    Write-Host "  Typical disk usage: 10–15 GB including the model and index."
+    Write-Host ""
+    Write-Host "  To uninstall later, delete:"
+    Write-Host "    • $InstallDir   (repo + venv + qdrant_data)"
+    Write-Host "    • $UserPrefix   (user-mode Ollama + Python, if you picked no-admin)"
+    Write-Host "    • %USERPROFILE%\.ollama\models\   (pulled models — shared across tools)"
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════" -ForegroundColor White
+    Write-Host ""
+
+    for ($i = $ReadDelay; $i -ge 1; $i--) {
+        Write-Host -NoNewline "`r  ⏳  $i s until Accept/Decline unlocks…  "
+        Start-Sleep -Seconds 1
+    }
+    Write-Host -NoNewline ("`r" + (' ' * 60) + "`r")
+
+    while ($true) {
+        $reply = Read-Host "  [A] Accept and continue    [D] Decline and exit"
+        switch -Regex ($reply) {
+            '^(a|y|accept|yes)$' { Ok "Accepted — continuing."; return }
+            '^(d|n|decline|no|)$' {
+                Info "Declined — no changes made. Exiting."
+                exit 0
+            }
+            default { Write-Host "  Please type 'a' to accept or 'd' to decline." }
+        }
+    }
+}
+
+Show-DisclaimerAndRequireAccept
 
 # ── Mode resolution ─────────────────────────────────────────────────
 if (-not $Mode -and $env:YLJ_INSTALL_MODE) {
@@ -369,4 +445,23 @@ $pyExe   = $pyParts[0]
 $pyRest  = @()
 if ($pyParts.Length -gt 1) { $pyRest = $pyParts[1..($pyParts.Length-1)] }
 & $pyExe @pyRest @installArgs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# ── Launch the server ──────────────────────────────────────────────
+# install.py created / reused a venv at $RepoDir\.venv. Run the server
+# under that venv's Python so the current PowerShell session becomes
+# the server host — Ctrl-C here stops it. Re-runs (repo already set
+# up) take this same path so the bootstrap always ends with a running
+# server.
+$VenvPy = Join-Path $RepoDir '.venv\Scripts\python.exe'
+if (-not (Test-Path $VenvPy)) {
+    Fail "Venv Python not found at $VenvPy — install.py did not finish cleanly."
+}
+
+Write-Host ""
+Ok "Install complete — launching YourLocalJared."
+Info "Open http://localhost:8000/setup in your browser (first-time onboarding)."
+Info "Ctrl-C here will stop the server."
+Write-Host ""
+& $VenvPy start.py
 exit $LASTEXITCODE

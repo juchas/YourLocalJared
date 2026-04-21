@@ -60,10 +60,12 @@ fail()  { printf "%s[FAIL]%s  %s\n" "$RED"   "$NC" "$*"; exit 1; }
 
 have()  { command -v "$1" >/dev/null 2>&1; }
 
-# ── Mode resolution ─────────────────────────────────────────────────
+# ── Arg parsing ─────────────────────────────────────────────────────
+# We accept a couple of flags the CLI-pipe path needs. Both are also
+# available via env vars so `YLJ_SKIP_DISCLAIMER=1 curl … | bash` works.
 MODE=""
+SKIP_DISCLAIMER="${YLJ_SKIP_DISCLAIMER:-}"
 
-# CLI flag — consumed before anything else.
 while [ $# -gt 0 ]; do
     case "$1" in
         --mode)
@@ -82,10 +84,99 @@ while [ $# -gt 0 ]; do
             esac
             shift
             ;;
+        --yes|-y)
+            # Accept the disclaimer without showing it. For CI and
+            # second-degree automation only. The interactive flow never
+            # takes this path.
+            SKIP_DISCLAIMER=1
+            shift
+            ;;
         *) break ;;
     esac
 done
 
+# ── Disclaimer ──────────────────────────────────────────────────────
+# Every interactive run shows the disclaimer; we deliberately don't
+# persist an "accepted" marker so users re-consent on every install.
+# The countdown exists so "spam Enter to dismiss" isn't a viable way
+# to skip reading — Accept/Decline only unlock after READ_DELAY seconds.
+READ_DELAY=8
+
+show_disclaimer_and_require_accept() {
+    if [ -n "$SKIP_DISCLAIMER" ]; then
+        info "Disclaimer skipped (YLJ_SKIP_DISCLAIMER / --yes set)."
+        return 0
+    fi
+    # Non-interactive pipelines (no TTY at all) also bypass — they
+    # couldn't meaningfully answer anyway. The server runs only under
+    # explicit human consent via the interactive path OR --yes.
+    if [ ! -t 0 ]; then
+        info "No TTY attached; skipping disclaimer. Re-run interactively to review it."
+        return 0
+    fi
+
+    printf '\n'
+    printf '%s═══════════════════════════════════════════════════════════════════%s\n' "$BOLD" "$NC"
+    printf '%s  YourLocalJared — please read before continuing%s\n' "$BOLD" "$NC"
+    printf '%s═══════════════════════════════════════════════════════════════════%s\n' "$BOLD" "$NC"
+    printf '\n'
+    printf '  This installer will:\n'
+    printf '\n'
+    printf '    1. Install git, Python 3.12, and Ollama — via your system\n'
+    printf '       package manager (with admin) or into your home directory\n'
+    printf '       (without admin, ~/.local/ylj/).\n'
+    printf '    2. Clone YourLocalJared to %s.\n' "$INSTALL_DIR"
+    printf '    3. Create a Python venv, install project dependencies, and\n'
+    printf '       pre-download a ~140 MB embedding model from Hugging Face.\n'
+    printf '    4. Pull a local LLM via Ollama (~2–15 GB depending on which\n'
+    printf '       one you pick in the onboarding wizard).\n'
+    printf '    5. Start a server at http://localhost:8000. You choose which\n'
+    printf '       folders on this machine the tool will index. Those files\n'
+    printf '       are chunked, embedded, and stored in ./qdrant_data/ next\n'
+    printf '       to the repo.\n'
+    printf '\n'
+    printf '  %sNothing you index, query, or say in chat leaves this machine.%s\n' "$BOLD" "$NC"
+    printf '  All inference runs against your local Ollama daemon.\n'
+    printf '\n'
+    printf '  Typical disk usage: 10–15 GB including the model and index.\n'
+    printf '\n'
+    printf '  To uninstall later, delete:\n'
+    printf '    • %s  (repo + venv + qdrant_data)\n' "$INSTALL_DIR"
+    printf '    • %s  (user-mode Ollama + Python, if you picked no-admin)\n' "$USER_PREFIX"
+    printf '    • ~/.ollama/models/  (pulled models — shared across tools)\n'
+    printf '\n'
+    printf '%s═══════════════════════════════════════════════════════════════════%s\n' "$BOLD" "$NC"
+    printf '\n'
+
+    local i
+    for i in $(seq "$READ_DELAY" -1 1); do
+        printf "\r  ⏳  %2ds until Accept/Decline unlocks…" "$i"
+        sleep 1
+    done
+    printf "\r  %-60s\r" " "
+
+    while true; do
+        printf "  %s[A]%s Accept and continue    %s[D]%s Decline and exit: " "$BOLD" "$NC" "$BOLD" "$NC"
+        read -r reply </dev/tty || reply="d"
+        case "${reply:-}" in
+            a|A|y|Y|accept|ACCEPT|yes|YES)
+                ok "Accepted — continuing."
+                return 0
+                ;;
+            d|D|n|N|decline|DECLINE|no|NO|"")
+                info "Declined — no changes made. Exiting."
+                exit 0
+                ;;
+            *)
+                printf "  Please type 'a' to accept or 'd' to decline.\n"
+                ;;
+        esac
+    done
+}
+
+show_disclaimer_and_require_accept
+
+# ── Mode resolution ─────────────────────────────────────────────────
 # Env var override.
 if [ -z "$MODE" ] && [ -n "${YLJ_INSTALL_MODE:-}" ]; then
     case "$YLJ_INSTALL_MODE" in
@@ -456,4 +547,22 @@ fi
 
 info "Running project setup: $PY ${install_args[*]}  (in $REPO_DIR)"
 cd "$REPO_DIR"
-exec "$PY" "${install_args[@]}"
+"$PY" "${install_args[@]}"
+
+# ── Launch the server ──────────────────────────────────────────────
+# install.py created / reused a venv at $REPO_DIR/.venv. We exec the
+# server under that venv's Python so the caller's shell becomes the
+# server process — Ctrl-C stops it, and there's no orphaned shell to
+# clean up. Re-runs (repo already set up) take this same path so the
+# bootstrap always ends with a running server.
+VENV_PY="$REPO_DIR/.venv/bin/python"
+if [ ! -x "$VENV_PY" ]; then
+    fail "Venv Python not found at $VENV_PY — install.py did not finish cleanly."
+fi
+
+printf '\n'
+ok "Install complete — launching YourLocalJared."
+info "Open http://localhost:8000/setup in your browser (first-time onboarding)."
+info "Ctrl-C here will stop the server."
+printf '\n'
+exec "$VENV_PY" start.py
