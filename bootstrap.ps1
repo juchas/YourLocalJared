@@ -4,10 +4,11 @@
 #
 #   iex (irm https://raw.githubusercontent.com/juchas/YourLocalJared/main/bootstrap.ps1)
 #
-# At the top we ask whether you can grant admin rights:
+# At the top we ask whether you can grant admin rights. Admin is
+# recommended for the best experience; the no-admin path still works.
 #
-#   1) Yes — use winget (faster)
-#   2) No — install everything to your user profile (no UAC)
+#   1) Yes — use winget (recommended)
+#   2) No — install everything to your user profile (no UAC needed)
 #   3) I'm not sure
 #
 # Non-interactive overrides (highest wins):
@@ -32,8 +33,9 @@ else                           { $InstallDir = $env:YLJ_INSTALL_DIR }
 # Per-user install prefix for no-admin mode. Mirrors the fallback path
 # that `ylj/server.py::_resolve_ollama` looks in, so the server finds
 # our ollama even without a PATH reshuffle.
-$UserPrefix = Join-Path $env:LOCALAPPDATA 'YourLocalJared'
-$UserBin    = Join-Path $UserPrefix 'bin'
+$UserPrefix    = Join-Path $env:LOCALAPPDATA 'YourLocalJared'
+$UserBin       = Join-Path $UserPrefix 'bin'
+$UserPythonDir = Join-Path $UserPrefix 'python'
 
 $ModeMarkerDir  = Join-Path $env:USERPROFILE '.YourLocalJared'
 $ModeMarkerFile = Join-Path $ModeMarkerDir 'install-mode'
@@ -41,6 +43,11 @@ $ModeMarkerFile = Join-Path $ModeMarkerDir 'install-mode'
 # Pinned Ollama release — `latest` is convenient but the asset-name
 # scheme has drifted across versions.
 $OllamaTag = 'v0.3.14'
+
+# Pinned python-build-standalone release. Bump by updating both values.
+# See https://github.com/astral-sh/python-build-standalone/releases
+$PbsDate    = '20241016'
+$PbsVersion = '3.12.7'
 
 function Info  { param($m) Write-Host "[INFO]  $m" -ForegroundColor Blue }
 function Ok    { param($m) Write-Host "[OK]    $m" -ForegroundColor Green }
@@ -73,9 +80,11 @@ if (-not $Mode) {
     if ($haveConsole) {
         Write-Host ""
         Write-Host "Can YourLocalJared use admin rights for this install?" -ForegroundColor White
+        Write-Host "Admin is recommended for the best experience — faster install, updates via"
+        Write-Host "the package manager. The no-admin path still installs everything you need."
         Write-Host ""
-        Write-Host "  1) Yes — use winget (faster, updates via package manager)"
-        Write-Host "  2) No — install everything to your user profile (no UAC)"
+        Write-Host "  1) Yes — use winget (recommended)"
+        Write-Host "  2) No — install everything to your user profile (no UAC needed)"
         Write-Host "  3) I'm not sure"
         Write-Host ""
         $choice = Read-Host "[1/2/3, default 3]"
@@ -186,20 +195,68 @@ function Ollama-Running {
     } catch { return $false }
 }
 
-function Setup-User {
-    # Python must already be present — bootstrapping Python itself without
-    # admin is a bigger follow-up (python-build-standalone). 99% of dev
-    # Windows installs already have Python via python.org or the MS Store.
-    $pyCmd = Resolve-PythonCmd
-    if (-not $pyCmd) {
-        Fail @"
-Python 3.10+ not found on PATH. Install it without admin via:
-  • https://www.python.org/downloads/  (choose "Install just for me")
-  • or via the Microsoft Store (search "Python 3.12")
-Then re-run this bootstrap.
-"@
+function Install-Portable-Python-User {
+    # Download a portable CPython via python-build-standalone when the
+    # machine doesn't have a usable system Python. Idempotent — existing
+    # extracted tree short-circuits the download.
+    $portablePy = Join-Path $UserPythonDir 'python.exe'
+    if (Test-Path $portablePy) {
+        Ok "Portable Python already installed at $portablePy"
+        return $portablePy
     }
-    Ok "Using Python: $pyCmd"
+    # python-build-standalone ships Windows as x86_64 and aarch64 now.
+    $arch = $env:PROCESSOR_ARCHITECTURE
+    $pbsPlatform = switch ($arch) {
+        'AMD64' { 'x86_64-pc-windows-msvc' }
+        'ARM64' { 'aarch64-pc-windows-msvc' }
+        default { Fail "No portable Python build for Windows $arch. Install Python 3.10+ manually and re-run." }
+    }
+    $url = "https://github.com/astral-sh/python-build-standalone/releases/download/$PbsDate/cpython-$PbsVersion+$PbsDate-$pbsPlatform-install_only.tar.gz"
+    Info "Downloading portable Python $PbsVersion ($pbsPlatform)…"
+    New-Item -ItemType Directory -Path $UserPrefix -Force | Out-Null
+    $tmp = Join-Path $env:TEMP ("ylj-python-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        $tarball = Join-Path $tmp 'python.tgz'
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $tarball -UseBasicParsing
+        } catch {
+            Fail "Could not download portable Python from $url — check your network and retry.`n$_"
+        }
+        # Windows 10 1803+ ships tar.exe; extract the .tar.gz into $UserPrefix.
+        # The archive's top-level is `python/`, so we land at $UserPrefix\python\.
+        if (-not (Have tar)) {
+            Fail "tar.exe not found on PATH. Windows 10 1803+ ships it by default; on older systems install Python 3.10+ manually and re-run with an existing Python."
+        }
+        & tar.exe -xzf $tarball -C $UserPrefix
+        if ($LASTEXITCODE -ne 0) { Fail "tar failed to extract portable Python (exit $LASTEXITCODE)." }
+    } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Test-Path $portablePy)) {
+        Fail "Portable Python extraction did not produce $portablePy"
+    }
+    # Sanity check — must report >= 3.10 before we hand off to install.py.
+    & $portablePy -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Extracted Python at $portablePy doesn't report >= 3.10 — bailing out."
+    }
+    $ver = & $portablePy --version 2>&1
+    Ok "Portable Python ready at $portablePy ($ver)"
+    return $portablePy
+}
+
+function Setup-User {
+    # Prefer an existing system Python (fast path). If none meets the
+    # version floor, download a portable build — that's the whole point
+    # of the no-admin path on clean machines.
+    $pyCmd = Resolve-PythonCmd
+    if ($pyCmd) {
+        Ok "Using system Python: $pyCmd"
+    } else {
+        Info "Python 3.10+ not found on PATH — installing portable Python into $UserPythonDir…"
+        $pyCmd = Install-Portable-Python-User
+    }
     $script:YljPythonCmd = $pyCmd
 
     if (Have git) { Ok "git available: $((git --version).Trim())" }

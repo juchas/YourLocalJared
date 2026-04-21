@@ -31,6 +31,7 @@ INSTALL_DIR="${YLJ_INSTALL_DIR:-$HOME/YourLocalJared}"
 # our ollama even without a PATH reshuffle.
 USER_PREFIX="$HOME/.local/ylj"
 USER_BIN="$USER_PREFIX/bin"
+USER_PYTHON_DIR="$USER_PREFIX/python"
 
 MODE_MARKER_DIR="$HOME/.YourLocalJared"
 MODE_MARKER_FILE="$MODE_MARKER_DIR/install-mode"
@@ -38,6 +39,12 @@ MODE_MARKER_FILE="$MODE_MARKER_DIR/install-mode"
 # Pinned Ollama release tag — `latest` is convenient but the asset-name
 # scheme has drifted across versions, so we target one we've tested.
 OLLAMA_TAG="v0.3.14"
+
+# Pinned python-build-standalone release. Bump by updating both values.
+# Release tag is a YYYYMMDD date; the version is the CPython version
+# that tag ships. See https://github.com/astral-sh/python-build-standalone/releases
+PBS_DATE="20241016"
+PBS_VERSION="3.12.7"
 
 # ── Colors ──────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -99,9 +106,11 @@ fi
 if [ -z "$MODE" ]; then
     if [ -t 0 ]; then
         printf "\n%sCan YourLocalJared use sudo/admin rights for this install?%s\n" "$BOLD" "$NC"
+        printf "Admin is recommended for the best experience — faster install, updates via\n"
+        printf "the package manager. The no-admin path still installs everything you need.\n"
         printf "\n"
-        printf "  %s1)%s Yes — use Homebrew / apt / dnf / pacman (faster, updates via package manager)\n" "$BOLD" "$NC"
-        printf "  %s2)%s No — install everything to your home directory (no sudo)\n" "$BOLD" "$NC"
+        printf "  %s1)%s Yes — use Homebrew / apt / dnf / pacman (recommended)\n" "$BOLD" "$NC"
+        printf "  %s2)%s No — install everything to your home directory (no sudo needed)\n" "$BOLD" "$NC"
         printf "  %s3)%s I'm not sure\n" "$BOLD" "$NC"
         printf "\n"
         printf "[1/2/3, default 3]: "
@@ -273,18 +282,56 @@ install_ollama_user_linux() {
     ok "Installed ollama at $USER_BIN/ollama"
 }
 
-setup_user_common() {
-    # Python must already be present — installing Python without admin is a
-    # separate (much bigger) follow-up; for now we tell the user how to get
-    # there if they don't have it. 99% of Macs and nearly every Linux box
-    # ships Python 3.10+ by default.
-    if ! PYTHON_CMD=$(resolve_python); then
-        fail $'Python 3.10+ not found on PATH. Install it via:\n'\
-$'    • macOS: download from https://www.python.org/downloads/ (no admin needed)\n'\
-$'    • Linux: use your distro package manager (or pyenv for per-user install)\n'\
-$'  Then re-run this bootstrap.'
+# Download a portable Python via python-build-standalone into $USER_PYTHON_DIR
+# when the machine doesn't already have a usable system Python. Idempotent:
+# re-running with $USER_PYTHON_DIR already populated is a no-op.
+install_portable_python_posix() {
+    local portable_py="$USER_PYTHON_DIR/bin/python3"
+    if [ -x "$portable_py" ]; then
+        ok "Portable Python already installed at $portable_py"
+        return
     fi
-    ok "Using Python: $PYTHON_CMD ($("$PYTHON_CMD" --version 2>&1))"
+    local pbs_platform=""
+    case "$OS:$ARCH" in
+        Darwin:arm64)          pbs_platform="aarch64-apple-darwin" ;;
+        Darwin:x86_64)         pbs_platform="x86_64-apple-darwin" ;;
+        Linux:x86_64|Linux:amd64)   pbs_platform="x86_64-unknown-linux-gnu" ;;
+        Linux:aarch64|Linux:arm64)  pbs_platform="aarch64-unknown-linux-gnu" ;;
+        *) fail "No portable Python build for $OS/$ARCH. Install Python 3.10+ manually and re-run." ;;
+    esac
+    local url="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_DATE}/cpython-${PBS_VERSION}+${PBS_DATE}-${pbs_platform}-install_only.tar.gz"
+    mkdir -p "$USER_PREFIX"
+    info "Downloading portable Python $PBS_VERSION ($pbs_platform)…"
+    local tmp
+    tmp=$(mktemp -d)
+    trap "rm -rf '$tmp'" RETURN
+    if ! curl -fsSL -o "$tmp/python.tgz" "$url"; then
+        fail "Could not download portable Python from $url — check your network and retry."
+    fi
+    # The tarball's top-level is `python/`; extracting into $USER_PREFIX
+    # produces $USER_PREFIX/python/bin/python3 exactly where we want it.
+    (cd "$USER_PREFIX" && tar -xzf "$tmp/python.tgz")
+    if [ ! -x "$portable_py" ]; then
+        fail "Portable Python extraction did not produce $portable_py"
+    fi
+    # Sanity-check the install is usable before we hand off to install.py.
+    if ! "$portable_py" -c 'import sys; assert sys.version_info >= (3, 10)' 2>/dev/null; then
+        fail "Extracted Python at $portable_py doesn't report >= 3.10 — bailing out."
+    fi
+    ok "Portable Python ready at $portable_py ($("$portable_py" --version 2>&1))"
+}
+
+setup_user_common() {
+    # Prefer an existing system Python (fast path). If none meets the
+    # version floor, download a portable build — that's the whole point
+    # of the no-admin path on clean machines.
+    if PYTHON_CMD=$(resolve_python); then
+        ok "Using system Python: $PYTHON_CMD ($("$PYTHON_CMD" --version 2>&1))"
+    else
+        info "Python 3.10+ not found on PATH — installing portable Python into $USER_PYTHON_DIR…"
+        install_portable_python_posix
+        PYTHON_CMD="$USER_PYTHON_DIR/bin/python3"
+    fi
     export YLJ_PYTHON_CMD="$PYTHON_CMD"
 
     # git is preferred for cloning; tarball fallback handled later.

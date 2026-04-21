@@ -10,7 +10,8 @@ A fully local RAG (Retrieval-Augmented Generation) chat that runs on your own ma
 
 - ~10 GB of disk (for a small model) plus room for your documents
 - Internet connection during install
-- Python 3.10+ on your machine if you pick the no-admin path (macOS ships with it; python.org has a "just for me" installer on Windows; every mainstream Linux distro includes it)
+
+That's it. The bootstrap handles git, Python, and Ollama for you — whether or not you have admin. If you don't already have Python 3.10+, the no-admin path downloads a portable one for you (~35 MB) so nothing needs elevating.
 
 The bootstrap scripts will **ask you** whether they can use admin/sudo for the one-time setup. Git and Ollama are installed either way.
 
@@ -44,7 +45,7 @@ Can YourLocalJared use sudo/admin rights for this install?
 
 **If you pick 1**, the script installs git + Python 3.12 + Ollama via the native package manager (Homebrew on macOS, apt/dnf/pacman on Linux, winget on Windows). Future updates come through `brew upgrade` / `apt upgrade` etc.
 
-**If you pick 2 or 3**, the script installs Ollama into `~/.local/ylj/bin/` (POSIX) or `%LOCALAPPDATA%\YourLocalJared\bin\` (Windows). It won't touch any system dirs or prompt for sudo/UAC. Re-run the bootstrap to update.
+**If you pick 2 or 3**, the script installs Ollama into `~/.local/ylj/bin/` (POSIX) or `%LOCALAPPDATA%\YourLocalJared\bin\` (Windows). If your machine doesn't have Python 3.10+ already, it also downloads a portable CPython (via [python-build-standalone](https://github.com/astral-sh/python-build-standalone)) into the same prefix. No system dirs are touched, no sudo / UAC is prompted. Re-run the bootstrap to update.
 
 Both paths then clone the repo to `~/YourLocalJared` (override with `YLJ_INSTALL_DIR`), create a venv, install project deps, pre-fetch the default embedding model, and start Ollama.
 
