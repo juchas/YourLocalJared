@@ -85,8 +85,9 @@ jobs:
           pbs_prefix="cpython-$PBS_VERSION+$PBS_DATE"
 
           urls=(
-            # Ollama: checksums manifest + every asset the bootstrap reaches for.
-            "$ollama_base/sha256sums.txt"
+            # Ollama: checksums manifest (singular — note sha256sum.txt,
+            # NOT sha256sums.txt) + every asset the bootstrap reaches for.
+            "$ollama_base/sha256sum.txt"
             "$ollama_base/Ollama-darwin.zip"
             "$ollama_base/ollama-linux-amd64.tgz"
             "$ollama_base/ollama-linux-arm64.tgz"

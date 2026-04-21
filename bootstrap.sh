@@ -42,9 +42,13 @@ OLLAMA_TAG="v0.5.4"
 
 # Pinned python-build-standalone release. Bump by updating both values.
 # Release tag is a YYYYMMDD date; the version is the CPython version
-# that tag ships. See https://github.com/astral-sh/python-build-standalone/releases
-PBS_DATE="20250127"
-PBS_VERSION="3.12.9"
+# that tag ships. 20241016 / 3.12.7 predated ARM-Windows support so it
+# couldn't serve Surface Pro X / Copilot+ Windows, and 20250127 doesn't
+# ship 3.12.9 at all. 20260414 / 3.12.13 is the most recent release we
+# verified has every arch/OS slug we dispatch to.
+# See https://github.com/astral-sh/python-build-standalone/releases
+PBS_DATE="20260414"
+PBS_VERSION="3.12.13"
 
 # ── Colors ──────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -343,11 +347,13 @@ setup_linux_system() {
 # have to munge the user's shell rc files.
 
 # Look up the expected SHA256 of a specific Ollama release asset from
-# the release's sha256sums.txt manifest. Ollama ships this file for
-# every tagged release, one line per asset: "<hash>  <filename>".
+# the release's sha256sum.txt manifest. Ollama ships this file for every
+# tagged release, one line per asset: "<hash>  ./<filename>". Note the
+# leading `./` — the awk below handles both the prefixed and bare form
+# so we don't break if Ollama ever drops the prefix.
 _ollama_expected_sha256() {
     local asset="$1"
-    local sums_url="https://github.com/ollama/ollama/releases/download/${OLLAMA_TAG}/sha256sums.txt"
+    local sums_url="https://github.com/ollama/ollama/releases/download/${OLLAMA_TAG}/sha256sum.txt"
     local sums
     if ! sums=$(curl -fsSL "$sums_url"); then
         fail "Could not fetch Ollama checksums from $sums_url — refusing to run unverified binary."

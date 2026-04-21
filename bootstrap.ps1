@@ -48,9 +48,12 @@ $ModeMarkerFile = Join-Path $ModeMarkerDir 'install-mode'
 $OllamaTag = 'v0.5.4'
 
 # Pinned python-build-standalone release. Bump by updating both values.
+# 20241016 / 3.12.7 predated ARM-Windows support; 20250127 doesn't ship
+# 3.12.9 at all. 20260414 / 3.12.13 is the most recent release we
+# verified has every arch/OS slug we dispatch to.
 # See https://github.com/astral-sh/python-build-standalone/releases
-$PbsDate    = '20250127'
-$PbsVersion = '3.12.9'
+$PbsDate    = '20260414'
+$PbsVersion = '3.12.13'
 
 function Info  { param($m) Write-Host "[INFO]  $m" -ForegroundColor Blue }
 function Ok    { param($m) Write-Host "[OK]    $m" -ForegroundColor Green }
@@ -85,10 +88,12 @@ Aborting install — the download may be corrupted or tampered with.
 }
 
 # Look up the expected SHA256 of a specific Ollama release asset from
-# the release's sha256sums.txt. Returns the hex digest or fails.
+# the release's sha256sum.txt manifest (note: singular). Returns the
+# hex digest or fails. Asset lines look like "<hash>  ./<filename>" —
+# the `-replace '^\./'` below strips the leading prefix.
 function Get-OllamaExpectedSha256 {
     param([Parameter(Mandatory)] [string] $Asset)
-    $sumsUrl = "https://github.com/ollama/ollama/releases/download/$OllamaTag/sha256sums.txt"
+    $sumsUrl = "https://github.com/ollama/ollama/releases/download/$OllamaTag/sha256sum.txt"
     try {
         $resp = Invoke-WebRequest -Uri $sumsUrl -UseBasicParsing
     } catch {
