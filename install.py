@@ -13,14 +13,26 @@ Steps:
   5. mkdir -p documents/.
   6. Ping the Ollama daemon (urllib, 2s timeout) and report status.
   7. Warm the default embedding model cache (skip if already cached).
-  8. Print platform-aware "how to start" instructions.
+  8. Write the install-mode marker file so future bootstrap runs skip the prompt.
+  9. Print platform-aware "how to start" instructions.
 
 If you already have Python 3.10+ + the repo cloned, running this file
 directly is the minimum install:  `python install.py`
+
+Args (usually passed through by bootstrap.sh / bootstrap.ps1):
+  --mode {system,user}  record whether the install was run with admin
+                        rights. Writes to ~/.YourLocalJared/install-mode.
+                        Defaults to 'system' when omitted (backwards-
+                        compatible with older runs).
+  --ollama-bin PATH     absolute path to the ollama binary when the
+                        bootstrap installed it into a user-local dir —
+                        used for the status check below. When omitted
+                        we fall back to shutil.which("ollama").
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import platform
 import shutil
@@ -35,6 +47,9 @@ MIN_PYTHON = (3, 10)
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 OLLAMA_URL = "http://localhost:11434/api/version"
 IS_WINDOWS = platform.system() == "Windows"
+
+MODE_MARKER_DIR = Path.home() / ".YourLocalJared"
+MODE_MARKER_FILE = MODE_MARKER_DIR / "install-mode"
 
 
 # ── Logging helpers ─────────────────────────────────────────────────
@@ -129,10 +144,18 @@ def ensure_documents_dir() -> None:
 
 
 # ── Step 6: Ollama status ───────────────────────────────────────────
-def check_ollama() -> None:
-    ollama_bin = shutil.which("ollama")
+def check_ollama(ollama_bin_override: str | None = None, mode: str = "system") -> None:
+    # In user mode bootstrap just dropped the binary into ~/.local/ylj/bin/
+    # (or %LOCALAPPDATA%\YourLocalJared\bin on Windows). shutil.which won't
+    # find it unless the user has that dir on PATH, so the bootstrap passes
+    # the absolute path through.
+    ollama_bin = ollama_bin_override or shutil.which("ollama")
+    if ollama_bin and not Path(ollama_bin).exists():
+        log("warn", f"ollama-bin override {ollama_bin} does not exist; falling back to PATH")
+        ollama_bin = shutil.which("ollama")
+
     if not ollama_bin:
-        log("warn", "ollama binary not found on PATH.")
+        log("warn", "ollama binary not found.")
         log("warn", "  Install from https://ollama.com (or run the bootstrap script again).")
         log("warn", "  Onboarding will prompt you to pull the model after ollama is up.")
         return
@@ -146,12 +169,29 @@ def check_ollama() -> None:
             log("warn", f"ollama daemon returned HTTP {resp.status}")
     except urllib.error.URLError:
         log("warn", "ollama is installed but the daemon isn't running.")
-        if IS_WINDOWS:
+        if mode == "user":
+            log("warn", f"  Start it with: {ollama_bin} serve")
+        elif IS_WINDOWS:
             log("warn", "  Start it from the Ollama menu app, or run: ollama serve")
         elif platform.system() == "Darwin":
             log("warn", "  Start it with: brew services start ollama  (or open the Ollama app)")
         else:
             log("warn", "  Start it with: sudo systemctl start ollama  (or run: ollama serve)")
+
+
+def write_mode_marker(mode: str) -> None:
+    """Remember the admin/no-admin choice across runs.
+
+    The bash/pwsh bootstrap reads this file before prompting so a re-run
+    on a machine that's already been set up can skip the question. We
+    write it here (and not from the shell script) so in-repo `python
+    install.py` without the bootstrap wrapper also records the choice.
+    """
+    try:
+        MODE_MARKER_DIR.mkdir(parents=True, exist_ok=True)
+        MODE_MARKER_FILE.write_text(f"{mode}\n", encoding="utf-8")
+    except OSError as e:
+        log("warn", f"Could not write install-mode marker at {MODE_MARKER_FILE}: {e}")
 
 
 # ── Step 7: embedding model warm-up ─────────────────────────────────
@@ -211,16 +251,39 @@ def print_next_steps(venv_dir: Path) -> None:
 
 
 # ── main ────────────────────────────────────────────────────────────
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Set up the YourLocalJared venv and record install mode.",
+    )
+    p.add_argument(
+        "--mode",
+        choices=("system", "user"),
+        default="system",
+        help="Install mode — recorded in ~/.YourLocalJared/install-mode so "
+             "future bootstrap runs skip the admin-rights prompt. Default: system.",
+    )
+    p.add_argument(
+        "--ollama-bin",
+        default=None,
+        help="Absolute path to the ollama binary (used when bootstrap "
+             "installed it into a user-local prefix). Defaults to PATH lookup.",
+    )
+    return p.parse_args(argv)
+
+
 def main() -> None:
+    args = parse_args()
     log("info", f"Platform: {platform.system()} {platform.release()} ({platform.machine()})")
+    log("info", f"Install mode: {args.mode}")
     check_python()
     venv_dir = ROOT / ".venv"
     vpy = create_or_reuse_venv(venv_dir)
     install_project(vpy)
     seed_dotenv()
     ensure_documents_dir()
-    check_ollama()
+    check_ollama(ollama_bin_override=args.ollama_bin, mode=args.mode)
     warm_embedding_cache(vpy)
+    write_mode_marker(args.mode)
     print_next_steps(venv_dir)
 
 

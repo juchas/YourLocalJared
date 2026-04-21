@@ -32,10 +32,34 @@ from ylj.rag import query, query_stream
 
 
 def _resolve_ollama() -> str:
-    """Find ollama.exe even if PATH hasn't been refreshed post-install."""
+    """Find the ollama binary even if PATH hasn't been refreshed post-install.
+
+    Search order:
+      1. ``shutil.which`` (user's PATH, covers brew/apt/dnf/winget installs).
+      2. User-local install paths used by bootstrap's no-admin mode:
+         - ``~/.local/ylj/bin/ollama`` on POSIX
+         - ``%LOCALAPPDATA%\\YourLocalJared\\bin\\ollama.exe`` on Windows
+      3. Standard Windows installer locations that sometimes aren't on PATH.
+      4. The bare name — subprocess will raise FileNotFoundError later with a
+         clear message.
+    """
     found = shutil.which("ollama")
     if found:
         return found
+
+    # User-local fallback (from bootstrap's no-admin install mode).
+    home = Path.home()
+    user_candidates: list[Path] = []
+    if sys.platform == "win32":
+        localappdata = os.environ.get("LOCALAPPDATA")
+        if localappdata:
+            user_candidates.append(Path(localappdata) / "YourLocalJared" / "bin" / "ollama.exe")
+    else:
+        user_candidates.append(home / ".local" / "ylj" / "bin" / "ollama")
+    for candidate in user_candidates:
+        if candidate.exists():
+            return str(candidate)
+
     if sys.platform == "win32":
         for candidate in (
             Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
