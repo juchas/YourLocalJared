@@ -254,7 +254,12 @@ _ollama_expected_sha256() {
     if ! sums=$(curl -fsSL "$sums_url"); then
         fail "Could not fetch Ollama checksums from $sums_url — refusing to run unverified binary."
     fi
-    printf "%s\n" "$sums" | awk -v f="$asset" '$2==f || $2=="./"f {print $1; exit}'
+    local hash
+    hash=$(printf "%s\n" "$sums" | awk -v f="$asset" '$2==f || $2=="./"f {print $1; exit}')
+    if [ -z "$hash" ]; then
+        fail "Could not find $asset in $sums_url — refusing to run unverified binary."
+    fi
+    printf "%s" "$hash"
 }
 
 install_ollama_user_macos() {
