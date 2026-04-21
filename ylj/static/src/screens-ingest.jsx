@@ -16,6 +16,9 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
   // indices below.
   const phases = ['scan', 'parse', 'embed', 'store'];
   const phaseIndex = { scan: 0, parse: 1, embed: 2, store: 3 };
+  // Gerund forms for the ring's under-label. A naive `${phase}ing` gave
+  // us "scaning" / "storeing" / "embeding" / "parseing" — all wrong.
+  const phaseGerund = { scan: 'scanning', parse: 'parsing', embed: 'embedding', store: 'storing' };
   const [phaseIdx, setPhaseIdx] = useState(0);
   const [totalFiles, setTotalFiles] = useState(Math.max(1, Math.floor(estimatedFiles)));
   const [filesProcessed, setFilesProcessed] = useState(0);
@@ -285,7 +288,7 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
                 {displayPct.toFixed(0)}<span style={{ fontSize: 16, color: 'var(--text-dim)' }}>%</span>
               </div>
               <div style={{ fontSize: 10, letterSpacing: '0.14em', color: 'var(--text-dimmer)', textTransform: 'uppercase' }}>
-                {done && !error ? 'done' : `${phases[phaseIdx]}ing`}
+                {done && !error ? 'done' : phaseGerund[phases[phaseIdx]]}
               </div>
             </div>
           </div>

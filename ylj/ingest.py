@@ -153,7 +153,7 @@ def _enumerate_files(
     dirs: list[Path],
     allowed_exts: set[str],
 ) -> tuple[list[Path], dict[str, int]]:
-    """Single walk of the selected roots.
+    """Single walk of the selected roots with directory-level pruning.
 
     Returns:
       files — paths matching ``allowed_exts`` (the set we can actually parse).
@@ -163,6 +163,14 @@ def _enumerate_files(
         we can't index — convert to .docx". We deliberately don't count
         every unknown extension here (noisy); just the known-unsupported
         ones we've documented.
+
+    Prunes :data:`documents.SKIP_DIRS` at the directory level (same pattern
+    as :func:`scanner.scan_folder`): a ``node_modules`` with 20k nested
+    files is one skip, not 20k per-path filter iterations. An earlier
+    version used ``sorted(d.rglob("*"))`` which materialised every path in
+    the tree before filtering — fine on a small corpus, brutal on a home
+    directory where ``.venv``/``.git``/``node_modules`` dominate the raw
+    count (observed ~180 s pre-scan stall on a real tree).
     """
     from ylj.documents import UNSUPPORTED_EXTENSIONS
 
@@ -171,17 +179,40 @@ def _enumerate_files(
     unsupported: dict[str, int] = {}
     for d in dirs:
         d = d.expanduser()
-        if not d.exists():
+        if not d.exists() or not d.is_dir():
             continue
-        for p in sorted(d.rglob("*")):
-            if not p.is_file() or _skip_path(p) or p in seen:
+        stack: list[Path] = [d]
+        while stack:
+            curr = stack.pop()
+            try:
+                # Sort within each directory for stable iteration order
+                # without materialising the entire tree up front.
+                entries = sorted(curr.iterdir())
+            except (OSError, PermissionError):
                 continue
-            seen.add(p)
-            suffix = p.suffix.lower()
-            if suffix in allowed_exts:
-                files.append(p)
-            elif suffix in UNSUPPORTED_EXTENSIONS:
-                unsupported[suffix] = unsupported.get(suffix, 0) + 1
+            for entry in entries:
+                if _skip_path(entry):
+                    continue
+                try:
+                    # Don't follow symlinks — they can point outside the
+                    # scanned tree and produce infinite loops.
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir():
+                        stack.append(entry)
+                        continue
+                    if not entry.is_file():
+                        continue
+                except (OSError, PermissionError):
+                    continue
+                if entry in seen:
+                    continue
+                seen.add(entry)
+                suffix = entry.suffix.lower()
+                if suffix in allowed_exts:
+                    files.append(entry)
+                elif suffix in UNSUPPORTED_EXTENSIONS:
+                    unsupported[suffix] = unsupported.get(suffix, 0) + 1
     return files, unsupported
 
 
