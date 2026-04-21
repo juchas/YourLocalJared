@@ -38,13 +38,17 @@ MODE_MARKER_FILE="$MODE_MARKER_DIR/install-mode"
 
 # Pinned Ollama release tag — `latest` is convenient but the asset-name
 # scheme has drifted across versions, so we target one we've tested.
-OLLAMA_TAG="v0.3.14"
+OLLAMA_TAG="v0.5.4"
 
 # Pinned python-build-standalone release. Bump by updating both values.
 # Release tag is a YYYYMMDD date; the version is the CPython version
-# that tag ships. See https://github.com/astral-sh/python-build-standalone/releases
-PBS_DATE="20241016"
-PBS_VERSION="3.12.7"
+# that tag ships. 20241016 / 3.12.7 predated ARM-Windows support so it
+# couldn't serve Surface Pro X / Copilot+ Windows, and 20250127 doesn't
+# ship 3.12.9 at all. 20260414 / 3.12.13 is the most recent release we
+# verified has every arch/OS slug we dispatch to.
+# See https://github.com/astral-sh/python-build-standalone/releases
+PBS_DATE="20260414"
+PBS_VERSION="3.12.13"
 
 # ── Colors ──────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -86,10 +90,13 @@ _verify_sha256() {
     ok "Verified SHA256 of $(basename "$file")"
 }
 
-# ── Mode resolution ─────────────────────────────────────────────────
+# ── Arg parsing ─────────────────────────────────────────────────────
+# We accept a couple of flags the CLI-pipe path needs. Both are also
+# available via env vars so `YLJ_SKIP_DISCLAIMER=1 curl … | bash` works.
 MODE=""
+SKIP_DISCLAIMER="${YLJ_SKIP_DISCLAIMER:-}"
+NO_LAUNCH="${YLJ_NO_LAUNCH:-}"
 
-# CLI flag — consumed before anything else.
 while [ $# -gt 0 ]; do
     case "$1" in
         --mode)
@@ -108,10 +115,105 @@ while [ $# -gt 0 ]; do
             esac
             shift
             ;;
+        --yes|-y)
+            # Accept the disclaimer without showing it. For CI and
+            # second-degree automation only. The interactive flow never
+            # takes this path.
+            SKIP_DISCLAIMER=1
+            shift
+            ;;
+        --no-launch)
+            NO_LAUNCH=1
+            shift
+            ;;
         *) break ;;
     esac
 done
 
+# ── Disclaimer ──────────────────────────────────────────────────────
+# Every interactive run shows the disclaimer; we deliberately don't
+# persist an "accepted" marker so users re-consent on every install.
+# The countdown exists so "spam Enter to dismiss" isn't a viable way
+# to skip reading — Accept/Decline only unlock after READ_DELAY seconds.
+READ_DELAY=8
+
+show_disclaimer_and_require_accept() {
+    case "${SKIP_DISCLAIMER:-}" in
+        1|true|True|TRUE|yes|Yes|YES)
+            info "Disclaimer skipped (YLJ_SKIP_DISCLAIMER / --yes set)."
+            return 0
+            ;;
+    esac
+    # Only bypass when there is truly no controlling terminal available
+    # (e.g. a headless daemon). curl|bash still has /dev/tty, so we can
+    # show the disclaimer even when stdin is a pipe.
+    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+        info "No controlling terminal available; skipping disclaimer. Re-run from an interactive terminal to review it."
+        return 0
+    fi
+
+    printf '\n'
+    printf '%s═══════════════════════════════════════════════════════════════════%s\n' "$BOLD" "$NC"
+    printf '%s  YourLocalJared — please read before continuing%s\n' "$BOLD" "$NC"
+    printf '%s═══════════════════════════════════════════════════════════════════%s\n' "$BOLD" "$NC"
+    printf '\n'
+    printf '  This installer will:\n'
+    printf '\n'
+    printf '    1. Install git, Python 3.12, and Ollama — via your system\n'
+    printf '       package manager (with admin) or into your home directory\n'
+    printf '       (without admin, ~/.local/ylj/).\n'
+    printf '    2. Clone YourLocalJared to %s.\n' "$INSTALL_DIR"
+    printf '    3. Create a Python venv, install project dependencies, and\n'
+    printf '       pre-download a ~140 MB embedding model from Hugging Face.\n'
+    printf '    4. Pull a local LLM via Ollama (~2–15 GB depending on which\n'
+    printf '       one you pick in the onboarding wizard).\n'
+    printf '    5. Start a server at http://localhost:8000. You choose which\n'
+    printf '       folders on this machine the tool will index. Those files\n'
+    printf '       are chunked, embedded, and stored in ./qdrant_data/ next\n'
+    printf '       to the repo.\n'
+    printf '\n'
+    printf '  %sNothing you index, query, or say in chat leaves this machine.%s\n' "$BOLD" "$NC"
+    printf '  All inference runs against your local Ollama daemon.\n'
+    printf '\n'
+    printf '  Typical disk usage: 10–15 GB including the model and index.\n'
+    printf '\n'
+    printf '  To uninstall later, delete:\n'
+    printf '    • %s  (repo + venv + qdrant_data)\n' "$INSTALL_DIR"
+    printf '    • %s  (user-mode Ollama + Python, if you picked no-admin)\n' "$USER_PREFIX"
+    printf '    • ~/.ollama/models/  (pulled models — shared across tools)\n'
+    printf '\n'
+    printf '%s═══════════════════════════════════════════════════════════════════%s\n' "$BOLD" "$NC"
+    printf '\n'
+
+    local i
+    for i in $(seq "$READ_DELAY" -1 1); do
+        printf "\r  ⏳  %2ds until Accept/Decline unlocks…" "$i"
+        sleep 1
+    done
+    printf "\r  %-60s\r" " "
+
+    while true; do
+        printf "  %s[A]%s Accept and continue    %s[D]%s Decline and exit: " "$BOLD" "$NC" "$BOLD" "$NC"
+        read -r reply </dev/tty || reply="d"
+        case "${reply:-}" in
+            a|A|y|Y|accept|ACCEPT|yes|YES)
+                ok "Accepted — continuing."
+                return 0
+                ;;
+            d|D|n|N|decline|DECLINE|no|NO|"")
+                info "Declined — no changes made. Exiting."
+                exit 0
+                ;;
+            *)
+                printf "  Please type 'a' to accept or 'd' to decline.\n"
+                ;;
+        esac
+    done
+}
+
+show_disclaimer_and_require_accept
+
+# ── Mode resolution ─────────────────────────────────────────────────
 # Env var override.
 if [ -z "$MODE" ] && [ -n "${YLJ_INSTALL_MODE:-}" ]; then
     case "$YLJ_INSTALL_MODE" in
@@ -245,11 +347,13 @@ setup_linux_system() {
 # have to munge the user's shell rc files.
 
 # Look up the expected SHA256 of a specific Ollama release asset from
-# the release's sha256sums.txt manifest. Ollama ships this file for
-# every tagged release, one line per asset: "<hash>  <filename>".
+# the release's sha256sum.txt manifest. Ollama ships this file for every
+# tagged release, one line per asset: "<hash>  ./<filename>". Note the
+# leading `./` — the awk below handles both the prefixed and bare form
+# so we don't break if Ollama ever drops the prefix.
 _ollama_expected_sha256() {
     local asset="$1"
-    local sums_url="https://github.com/ollama/ollama/releases/download/${OLLAMA_TAG}/sha256sums.txt"
+    local sums_url="https://github.com/ollama/ollama/releases/download/${OLLAMA_TAG}/sha256sum.txt"
     local sums
     if ! sums=$(curl -fsSL "$sums_url"); then
         fail "Could not fetch Ollama checksums from $sums_url — refusing to run unverified binary."
@@ -517,4 +621,43 @@ fi
 
 info "Running project setup: $PY ${install_args[*]}  (in $REPO_DIR)"
 cd "$REPO_DIR"
-exec "$PY" "${install_args[@]}"
+"$PY" "${install_args[@]}"
+
+# ── Launch the server ──────────────────────────────────────────────
+# install.py created / reused a venv at $REPO_DIR/.venv. In interactive
+# terminal use we exec the server under that venv's Python so the
+# caller's shell becomes the server process — Ctrl-C stops it, and
+# there's no orphaned shell to clean up. In automation / CI skip the
+# auto-launch so the bootstrap can terminate cleanly. Set YLJ_NO_LAUNCH=1
+# (or pass --no-launch) to explicitly suppress launch in any context.
+VENV_PY="$REPO_DIR/.venv/bin/python"
+if [ ! -x "$VENV_PY" ]; then
+    fail "Venv Python not found at $VENV_PY — install.py did not finish cleanly."
+fi
+
+SHOULD_LAUNCH=1
+case "${NO_LAUNCH:-}" in
+    1|true|True|TRUE|yes|Yes|YES) SHOULD_LAUNCH=0 ;;
+esac
+if [ "$SHOULD_LAUNCH" = "1" ] && { [ ! -t 1 ] || [ ! -t 2 ]; }; then
+    SHOULD_LAUNCH=0
+fi
+
+printf '\n'
+if [ "$SHOULD_LAUNCH" = "1" ]; then
+    ok "Install complete — launching YourLocalJared."
+    info "Open http://localhost:8000/setup in your browser (first-time onboarding)."
+    info "Ctrl-C here will stop the server."
+    printf '\n'
+    exec "$VENV_PY" start.py
+fi
+
+ok "Install complete — auto-launch skipped."
+case "${NO_LAUNCH:-}" in
+    1|true|True|TRUE|yes|Yes|YES)
+        info "Auto-launch disabled by --no-launch / YLJ_NO_LAUNCH." ;;
+    *)
+        info "No interactive console detected; not starting the server automatically." ;;
+esac
+info "Start it manually with:"
+info "  cd \"$REPO_DIR\" && \"$VENV_PY\" start.py"

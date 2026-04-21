@@ -20,7 +20,10 @@
 # Re-runnable: every step is idempotent.
 
 param(
-    [ValidateSet('system','user','')] [string] $Mode = ''
+    [ValidateSet('system','user','')] [string] $Mode = '',
+    # Skip the disclaimer and the countdown. Intended for CI / automation
+    # only — the interactive install always shows the disclaimer.
+    [switch] $Yes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,12 +45,15 @@ $ModeMarkerFile = Join-Path $ModeMarkerDir 'install-mode'
 
 # Pinned Ollama release — `latest` is convenient but the asset-name
 # scheme has drifted across versions.
-$OllamaTag = 'v0.3.14'
+$OllamaTag = 'v0.5.4'
 
 # Pinned python-build-standalone release. Bump by updating both values.
+# 20241016 / 3.12.7 predated ARM-Windows support; 20250127 doesn't ship
+# 3.12.9 at all. 20260414 / 3.12.13 is the most recent release we
+# verified has every arch/OS slug we dispatch to.
 # See https://github.com/astral-sh/python-build-standalone/releases
-$PbsDate    = '20241016'
-$PbsVersion = '3.12.7'
+$PbsDate    = '20260414'
+$PbsVersion = '3.12.13'
 
 function Info  { param($m) Write-Host "[INFO]  $m" -ForegroundColor Blue }
 function Ok    { param($m) Write-Host "[OK]    $m" -ForegroundColor Green }
@@ -72,7 +78,7 @@ function Assert-Sha256 {
     $exp = $Expected.ToLower()
     if ($actual -ne $exp) {
         Fail @"
-SHA256 mismatch for $Path:
+SHA256 mismatch for ${Path}:
   expected: $exp
   actual:   $actual
 Aborting install — the download may be corrupted or tampered with.
@@ -82,10 +88,12 @@ Aborting install — the download may be corrupted or tampered with.
 }
 
 # Look up the expected SHA256 of a specific Ollama release asset from
-# the release's sha256sums.txt. Returns the hex digest or fails.
+# the release's sha256sum.txt manifest (note: singular). Returns the
+# hex digest or fails. Asset lines look like "<hash>  ./<filename>" —
+# the `-replace '^\./'` below strips the leading prefix.
 function Get-OllamaExpectedSha256 {
     param([Parameter(Mandatory)] [string] $Asset)
-    $sumsUrl = "https://github.com/ollama/ollama/releases/download/$OllamaTag/sha256sums.txt"
+    $sumsUrl = "https://github.com/ollama/ollama/releases/download/$OllamaTag/sha256sum.txt"
     try {
         $resp = Invoke-WebRequest -Uri $sumsUrl -UseBasicParsing
     } catch {
@@ -106,6 +114,79 @@ function Refresh-Path {
     $user    = [Environment]::GetEnvironmentVariable('Path', 'User')
     $env:Path = "$machine;$user"
 }
+
+# ── Disclaimer ──────────────────────────────────────────────────────
+# Every interactive run shows the disclaimer; we deliberately don't
+# persist an "accepted" marker so users re-consent on every install.
+# The countdown exists so "spam Enter to dismiss" isn't a viable way
+# to skip reading — Accept/Decline only unlock after $ReadDelay seconds.
+$ReadDelay = 8
+
+function Show-DisclaimerAndRequireAccept {
+    $skip = $Yes.IsPresent -or $env:YLJ_SKIP_DISCLAIMER
+    if ($skip) {
+        Info "Disclaimer skipped (-Yes / YLJ_SKIP_DISCLAIMER set)."
+        return
+    }
+    $haveConsole = $false
+    try { $haveConsole = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected } catch { $haveConsole = $false }
+    if (-not $haveConsole) {
+        Info "No interactive console; skipping disclaimer. Re-run interactively to review it."
+        return
+    }
+
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════" -ForegroundColor White
+    Write-Host "  YourLocalJared — please read before continuing" -ForegroundColor White
+    Write-Host "═══════════════════════════════════════════════════════════════════" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  This installer will:"
+    Write-Host ""
+    Write-Host "    1. Install git, Python 3.12, and Ollama — via winget (with admin)"
+    Write-Host "       or into %LOCALAPPDATA%\YourLocalJared\ (without admin)."
+    Write-Host "    2. Clone YourLocalJared to $InstallDir."
+    Write-Host "    3. Create a Python venv, install project dependencies, and"
+    Write-Host "       pre-download a ~140 MB embedding model from Hugging Face."
+    Write-Host "    4. Pull a local LLM via Ollama (~2–15 GB depending on which"
+    Write-Host "       one you pick in the onboarding wizard)."
+    Write-Host "    5. Start a server at http://localhost:8000. You choose which"
+    Write-Host "       folders on this machine the tool will index. Those files"
+    Write-Host "       are chunked, embedded, and stored in .\qdrant_data\ next"
+    Write-Host "       to the repo."
+    Write-Host ""
+    Write-Host "  Nothing you index, query, or say in chat leaves this machine." -ForegroundColor White
+    Write-Host "  All inference runs against your local Ollama daemon."
+    Write-Host ""
+    Write-Host "  Typical disk usage: 10–15 GB including the model and index."
+    Write-Host ""
+    Write-Host "  To uninstall later, delete:"
+    Write-Host "    • $InstallDir   (repo + venv + qdrant_data)"
+    Write-Host "    • $UserPrefix   (user-mode Ollama + Python, if you picked no-admin)"
+    Write-Host "    • %USERPROFILE%\.ollama\models\   (pulled models — shared across tools)"
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════" -ForegroundColor White
+    Write-Host ""
+
+    for ($i = $ReadDelay; $i -ge 1; $i--) {
+        Write-Host -NoNewline "`r  ⏳  $i s until Accept/Decline unlocks…  "
+        Start-Sleep -Seconds 1
+    }
+    Write-Host -NoNewline ("`r" + (' ' * 60) + "`r")
+
+    while ($true) {
+        $reply = Read-Host "  [A] Accept and continue    [D] Decline and exit"
+        switch -Regex ($reply) {
+            '^(a|y|accept|yes)$' { Ok "Accepted — continuing."; return }
+            '^(d|n|decline|no|)$' {
+                Info "Declined — no changes made. Exiting."
+                exit 0
+            }
+            default { Write-Host "  Please type 'a' to accept or 'd' to decline." }
+        }
+    }
+}
+
+Show-DisclaimerAndRequireAccept
 
 # ── Mode resolution ─────────────────────────────────────────────────
 if (-not $Mode -and $env:YLJ_INSTALL_MODE) {
@@ -427,4 +508,22 @@ $pyExe   = $pyParts[0]
 $pyRest  = @()
 if ($pyParts.Length -gt 1) { $pyRest = $pyParts[1..($pyParts.Length-1)] }
 & $pyExe @pyRest @installArgs
-exit $LASTEXITCODE
+if ($LASTEXITCODE -ne 0) { throw "install.py failed with exit code $LASTEXITCODE" }
+
+# ── Launch the server ──────────────────────────────────────────────
+# install.py created / reused a venv at $RepoDir\.venv. Run the server
+# under that venv's Python so the current PowerShell session becomes
+# the server host — Ctrl-C here stops it. Re-runs (repo already set
+# up) take this same path so the bootstrap always ends with a running
+# server.
+$VenvPy = Join-Path $RepoDir '.venv\Scripts\python.exe'
+if (-not (Test-Path $VenvPy)) {
+    Fail "Venv Python not found at $VenvPy — install.py did not finish cleanly."
+}
+
+Write-Host ""
+Ok "Install complete — launching YourLocalJared."
+Info "Open http://localhost:8000/setup in your browser (first-time onboarding)."
+Info "Ctrl-C here will stop the server."
+Write-Host ""
+& $VenvPy start.py
