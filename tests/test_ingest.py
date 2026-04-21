@@ -121,6 +121,62 @@ def test_partition_files_reprocesses_on_size_drift(tmp_path):
     assert to_process == [p]
 
 
+def test_enumerate_files_prunes_skip_dirs_at_directory_level(tmp_path):
+    """Walking into ``node_modules`` / ``.git`` and filtering per-file
+    was an O(everything) trap on home-directory-scale trees — ingest
+    sometimes stalled ~3 minutes before the scan event even fired.
+    ``_enumerate_files`` must prune these at the directory level so the
+    cost is one ``_skip_path`` check per skip dir, not one per nested
+    file. We assert the fast-path by placing a sentinel file inside a
+    skip dir and confirming it was never enumerated.
+    """
+    root = tmp_path / "docs"
+    (root / "node_modules" / "deep" / "very" / "nested").mkdir(parents=True)
+    (root / ".git" / "objects").mkdir(parents=True)
+    (root / "sub").mkdir(parents=True)
+
+    keep_a = root / "a.txt"
+    keep_b = root / "sub" / "b.md"
+    keep_a.write_text("alpha")
+    keep_b.write_text("# bravo")
+    # Files that should be pruned — any of these appearing in `files`
+    # means the walker descended into a skip dir.
+    (root / "node_modules" / "deep" / "very" / "nested" / "junk.txt").write_text("x")
+    (root / "node_modules" / "package.json").write_text("x")
+    (root / ".git" / "objects" / "pack.idx").write_text("x")
+
+    files, unsupported = ingest_mod._enumerate_files([root], {".txt", ".md"})
+
+    assert set(files) == {keep_a, keep_b}
+    assert unsupported == {}
+
+
+def test_enumerate_files_skips_symlinks(tmp_path):
+    """Symlinks can escape the scanned tree or create infinite loops;
+    the walker must refuse to follow them — both symlinked files and
+    symlinked directories."""
+    root = tmp_path / "docs"
+    root.mkdir()
+    real = root / "real.txt"
+    real.write_text("alpha")
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("nope")
+
+    # Symlinked file — the target is a real .txt inside root but we still
+    # skip the link itself (would double-count otherwise).
+    try:
+        (root / "link.txt").symlink_to(real)
+        (root / "outside_link").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this platform")
+
+    files, _ = ingest_mod._enumerate_files([root], {".txt"})
+
+    assert files == [real]
+
+
 def test_find_orphans_only_under_scanned_roots(tmp_path):
     root_a = tmp_path / "a"
     root_b = tmp_path / "b"
