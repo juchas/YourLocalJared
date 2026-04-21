@@ -8,19 +8,41 @@ on:
 
 jobs:
   test:
-    name: lint + test (${{ matrix.os }})
+    name: lint + test (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # Floor is 3.10 (pyproject); bootstrap installs 3.12. Cover
+        # the floor, the historical CI version, and the version users
+        # actually end up on so nobody ships a regression for any of
+        # the three.
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
+
+      # Bash / PowerShell parse validation runs first: a malformed
+      # bootstrap.* shouldn't wait on the slower install + pytest step
+      # to surface. Paired scripts so install.sh (the shim) is checked
+      # too.
+      - name: Bash syntax check
+        if: runner.os != 'Windows'
+        run: |
+          bash -n bootstrap.sh
+          bash -n install.sh
+
+      - name: PowerShell parse check
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          try { $null = [scriptblock]::Create((Get-Content ./bootstrap.ps1 -Raw)) }
+          catch { Write-Error $_; exit 1 }
 
       - name: Install project
         shell: bash
@@ -38,3 +60,56 @@ jobs:
 
       - name: Pytest
         run: pytest -v
+
+  url-check:
+    name: Pinned download URLs reachable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: HEAD every pinned Ollama + python-build-standalone asset
+        # The pinned versions come straight out of bootstrap.sh so this
+        # check stays in lockstep when someone bumps them. A 404 here
+        # means the asset name drifted (rename, dropped arch, …) — we
+        # want to know *before* a user's install hits it.
+        run: |
+          set -euo pipefail
+
+          OLLAMA_TAG=$(grep '^OLLAMA_TAG=' bootstrap.sh | cut -d'"' -f2)
+          PBS_DATE=$(grep '^PBS_DATE=' bootstrap.sh | cut -d'"' -f2)
+          PBS_VERSION=$(grep '^PBS_VERSION=' bootstrap.sh | cut -d'"' -f2)
+          echo "Verifying Ollama $OLLAMA_TAG, python-build-standalone $PBS_VERSION+$PBS_DATE"
+
+          ollama_base="https://github.com/ollama/ollama/releases/download/$OLLAMA_TAG"
+          pbs_base="https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_DATE"
+          pbs_prefix="cpython-$PBS_VERSION+$PBS_DATE"
+
+          urls=(
+            # Ollama: checksums manifest + every asset the bootstrap reaches for.
+            "$ollama_base/sha256sums.txt"
+            "$ollama_base/Ollama-darwin.zip"
+            "$ollama_base/ollama-linux-amd64.tgz"
+            "$ollama_base/ollama-linux-arm64.tgz"
+            "$ollama_base/ollama-windows-amd64.zip"
+            # python-build-standalone: every platform slug bootstrap dispatches to.
+            "$pbs_base/$pbs_prefix-x86_64-apple-darwin-install_only.tar.gz"
+            "$pbs_base/$pbs_prefix-aarch64-apple-darwin-install_only.tar.gz"
+            "$pbs_base/$pbs_prefix-x86_64-unknown-linux-gnu-install_only.tar.gz"
+            "$pbs_base/$pbs_prefix-aarch64-unknown-linux-gnu-install_only.tar.gz"
+            "$pbs_base/$pbs_prefix-x86_64-pc-windows-msvc-install_only.tar.gz"
+            "$pbs_base/$pbs_prefix-aarch64-pc-windows-msvc-install_only.tar.gz"
+          )
+          failed=0
+          for url in "${urls[@]}"; do
+            printf '  HEAD %s ... ' "$url"
+            if curl -fsILo /dev/null --max-time 30 --retry 2 "$url"; then
+              printf 'OK\n'
+            else
+              printf 'DRIFT\n'
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "One or more pinned URLs returned non-2xx. Bump the pinned versions in bootstrap.sh / bootstrap.ps1."
+            exit 1
+          fi
