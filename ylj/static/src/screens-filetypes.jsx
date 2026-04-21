@@ -7,6 +7,17 @@ function ScreenFileTypes({ onNext, onBack, fileTypes, setFileTypes, folders }) {
   const toggle = (id) => setFileTypes(ts => ts.map(t => t.id === id ? { ...t, on: !t.on } : t));
   const selectedIds = derived.filter(t => t.on).map(t => t.id);
 
+  // Read-only "not indexed" categories (e.g. .doc / .rtf). Counts are
+  // computed the same way as the togglable list but never appear in
+  // `enabledExtensions` — toggling them makes no sense because the
+  // backend has no parser. Only rendered when the scan found at least
+  // one matching file, keeping the screen clean for all-modern corpora.
+  const unsupportedDerived = (window.UNSUPPORTED_FILETYPES || []).length > 0
+    ? computeFileTypeCounts(folders || [], window.UNSUPPORTED_FILETYPES || [])
+    : [];
+  const unsupportedVisible = unsupportedDerived.filter(t => t.count > 0);
+  const unsupportedTotal = unsupportedVisible.reduce((a, b) => a + b.count, 0);
+
   return (
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -48,6 +59,44 @@ function ScreenFileTypes({ onNext, onBack, fileTypes, setFileTypes, folders }) {
               </Row>
             );
           })}
+
+          {unsupportedVisible.length > 0 && (
+            <div style={{
+              borderTop: '1px solid var(--border)',
+              padding: '14px 16px 4px',
+              display: 'flex', alignItems: 'center', gap: 10,
+              background: 'var(--bg-alt)',
+              fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+              color: 'var(--text-dimmer)',
+            }}>
+              <Icon name="x" size={10} />
+              <span>not indexed · {unsupportedTotal.toLocaleString()} file{unsupportedTotal === 1 ? '' : 's'}</span>
+              <span style={{ flex: 1 }} />
+              <span style={{ color: 'var(--text-faintest)', textTransform: 'none', letterSpacing: '0.04em' }}>
+                no parser ships for these yet — convert to include
+              </span>
+            </div>
+          )}
+          {unsupportedVisible.map(t => (
+            <Row key={t.id} accent="var(--border-hi)" style={{
+              opacity: 0.6, cursor: 'default',
+              background: 'var(--bg-alt)',
+            }}>
+              <span style={{ width: 16 }} />
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="file" size={12} style={{ color: 'var(--text-dimmer)' }} />
+                <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{t.label}</span>
+                <span style={{ fontSize: 10.5, color: 'var(--text-faintest)', fontStyle: 'italic' }}>
+                  · {t.hint}
+                </span>
+              </div>
+              <span style={{ width: 220, fontSize: 11, color: 'var(--text-dimmer)' }}>{t.ext}</span>
+              <div style={{ width: 100 }} />
+              <span style={{ width: 80, textAlign: 'right', fontSize: 11, color: 'var(--text-dimmer)' }}>
+                {t.count.toLocaleString()}
+              </span>
+            </Row>
+          ))}
         </div>
 
         <StepNav onBack={onBack} onNext={onNext} nextLabel="choose models" nextDisabled={selectedIds.length === 0} />
