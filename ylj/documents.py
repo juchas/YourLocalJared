@@ -5,7 +5,11 @@ from pathlib import Path
 
 from ylj.config import CHUNK_OVERLAP, CHUNK_SIZE
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md", ".csv"}
+SUPPORTED_EXTENSIONS = {
+    ".pdf", ".docx", ".xlsx", ".pptx",
+    ".txt", ".md", ".markdown", ".mdx",
+    ".csv", ".tsv",
+}
 
 # Directories to skip during recursive scanning
 SKIP_DIRS = {
@@ -133,9 +137,17 @@ PARSERS = {
     ".docx": parse_docx,
     ".xlsx": parse_xlsx,
     ".pptx": parse_pptx,
+    # Markdown variants all parse as text. `.mdx` has JSX embedded but
+    # the JSX is valid-enough text for retrieval; treating it as plain
+    # text is better than skipping the file.
     ".txt": parse_text,
     ".md": parse_text,
+    ".markdown": parse_text,
+    ".mdx": parse_text,
+    # Tabular: `.tsv` is just `.csv` with tabs; parse_text handles both
+    # fine — we don't need column-aware parsing for retrieval purposes.
     ".csv": parse_text,
+    ".tsv": parse_text,
 }
 
 
