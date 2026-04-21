@@ -38,13 +38,13 @@ MODE_MARKER_FILE="$MODE_MARKER_DIR/install-mode"
 
 # Pinned Ollama release tag — `latest` is convenient but the asset-name
 # scheme has drifted across versions, so we target one we've tested.
-OLLAMA_TAG="v0.3.14"
+OLLAMA_TAG="v0.5.4"
 
 # Pinned python-build-standalone release. Bump by updating both values.
 # Release tag is a YYYYMMDD date; the version is the CPython version
 # that tag ships. See https://github.com/astral-sh/python-build-standalone/releases
-PBS_DATE="20241016"
-PBS_VERSION="3.12.7"
+PBS_DATE="20250127"
+PBS_VERSION="3.12.9"
 
 # ── Colors ──────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -91,6 +91,7 @@ _verify_sha256() {
 # available via env vars so `YLJ_SKIP_DISCLAIMER=1 curl … | bash` works.
 MODE=""
 SKIP_DISCLAIMER="${YLJ_SKIP_DISCLAIMER:-}"
+NO_LAUNCH="${YLJ_NO_LAUNCH:-}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -117,6 +118,10 @@ while [ $# -gt 0 ]; do
             SKIP_DISCLAIMER=1
             shift
             ;;
+        --no-launch)
+            NO_LAUNCH=1
+            shift
+            ;;
         *) break ;;
     esac
 done
@@ -129,15 +134,17 @@ done
 READ_DELAY=8
 
 show_disclaimer_and_require_accept() {
-    if [ -n "$SKIP_DISCLAIMER" ]; then
-        info "Disclaimer skipped (YLJ_SKIP_DISCLAIMER / --yes set)."
-        return 0
-    fi
-    # Non-interactive pipelines (no TTY at all) also bypass — they
-    # couldn't meaningfully answer anyway. The server runs only under
-    # explicit human consent via the interactive path OR --yes.
-    if [ ! -t 0 ]; then
-        info "No TTY attached; skipping disclaimer. Re-run interactively to review it."
+    case "${SKIP_DISCLAIMER:-}" in
+        1|true|True|TRUE|yes|Yes|YES)
+            info "Disclaimer skipped (YLJ_SKIP_DISCLAIMER / --yes set)."
+            return 0
+            ;;
+    esac
+    # Only bypass when there is truly no controlling terminal available
+    # (e.g. a headless daemon). curl|bash still has /dev/tty, so we can
+    # show the disclaimer even when stdin is a pipe.
+    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+        info "No controlling terminal available; skipping disclaimer. Re-run from an interactive terminal to review it."
         return 0
     fi
 
@@ -611,19 +618,40 @@ cd "$REPO_DIR"
 "$PY" "${install_args[@]}"
 
 # ── Launch the server ──────────────────────────────────────────────
-# install.py created / reused a venv at $REPO_DIR/.venv. We exec the
-# server under that venv's Python so the caller's shell becomes the
-# server process — Ctrl-C stops it, and there's no orphaned shell to
-# clean up. Re-runs (repo already set up) take this same path so the
-# bootstrap always ends with a running server.
+# install.py created / reused a venv at $REPO_DIR/.venv. In interactive
+# terminal use we exec the server under that venv's Python so the
+# caller's shell becomes the server process — Ctrl-C stops it, and
+# there's no orphaned shell to clean up. In automation / CI skip the
+# auto-launch so the bootstrap can terminate cleanly. Set YLJ_NO_LAUNCH=1
+# (or pass --no-launch) to explicitly suppress launch in any context.
 VENV_PY="$REPO_DIR/.venv/bin/python"
 if [ ! -x "$VENV_PY" ]; then
     fail "Venv Python not found at $VENV_PY — install.py did not finish cleanly."
 fi
 
+SHOULD_LAUNCH=1
+case "${NO_LAUNCH:-}" in
+    1|true|True|TRUE|yes|Yes|YES) SHOULD_LAUNCH=0 ;;
+esac
+if [ "$SHOULD_LAUNCH" = "1" ] && { [ ! -t 1 ] || [ ! -t 2 ]; }; then
+    SHOULD_LAUNCH=0
+fi
+
 printf '\n'
-ok "Install complete — launching YourLocalJared."
-info "Open http://localhost:8000/setup in your browser (first-time onboarding)."
-info "Ctrl-C here will stop the server."
-printf '\n'
-exec "$VENV_PY" start.py
+if [ "$SHOULD_LAUNCH" = "1" ]; then
+    ok "Install complete — launching YourLocalJared."
+    info "Open http://localhost:8000/setup in your browser (first-time onboarding)."
+    info "Ctrl-C here will stop the server."
+    printf '\n'
+    exec "$VENV_PY" start.py
+fi
+
+ok "Install complete — auto-launch skipped."
+case "${NO_LAUNCH:-}" in
+    1|true|True|TRUE|yes|Yes|YES)
+        info "Auto-launch disabled by --no-launch / YLJ_NO_LAUNCH." ;;
+    *)
+        info "No interactive console detected; not starting the server automatically." ;;
+esac
+info "Start it manually with:"
+info "  cd \"$REPO_DIR\" && \"$VENV_PY\" start.py"

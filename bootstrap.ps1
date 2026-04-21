@@ -45,12 +45,12 @@ $ModeMarkerFile = Join-Path $ModeMarkerDir 'install-mode'
 
 # Pinned Ollama release — `latest` is convenient but the asset-name
 # scheme has drifted across versions.
-$OllamaTag = 'v0.3.14'
+$OllamaTag = 'v0.5.4'
 
 # Pinned python-build-standalone release. Bump by updating both values.
 # See https://github.com/astral-sh/python-build-standalone/releases
-$PbsDate    = '20241016'
-$PbsVersion = '3.12.7'
+$PbsDate    = '20250127'
+$PbsVersion = '3.12.9'
 
 function Info  { param($m) Write-Host "[INFO]  $m" -ForegroundColor Blue }
 function Ok    { param($m) Write-Host "[OK]    $m" -ForegroundColor Green }
@@ -75,7 +75,7 @@ function Assert-Sha256 {
     $exp = $Expected.ToLower()
     if ($actual -ne $exp) {
         Fail @"
-SHA256 mismatch for $Path:
+SHA256 mismatch for ${Path}:
   expected: $exp
   actual:   $actual
 Aborting install — the download may be corrupted or tampered with.
@@ -503,7 +503,7 @@ $pyExe   = $pyParts[0]
 $pyRest  = @()
 if ($pyParts.Length -gt 1) { $pyRest = $pyParts[1..($pyParts.Length-1)] }
 & $pyExe @pyRest @installArgs
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($LASTEXITCODE -ne 0) { throw "install.py failed with exit code $LASTEXITCODE" }
 
 # ── Launch the server ──────────────────────────────────────────────
 # install.py created / reused a venv at $RepoDir\.venv. Run the server
@@ -522,4 +522,3 @@ Info "Open http://localhost:8000/setup in your browser (first-time onboarding)."
 Info "Ctrl-C here will stop the server."
 Write-Host ""
 & $VenvPy start.py
-exit $LASTEXITCODE

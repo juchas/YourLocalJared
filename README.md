@@ -33,12 +33,12 @@ iex (irm https://raw.githubusercontent.com/juchas/YourLocalJared/main/bootstrap.
 
 The bootstrap is one script, start to finish:
 
-1. **Disclaimer.** Before anything is touched, the script shows what it's about to install, how much disk it'll use, and confirms nothing you index ever leaves the machine. Accept/Decline unlock after a few seconds of read time. Re-runs show the disclaimer again — we never record "yes, I accepted" to a file.
+1. **Disclaimer.** In interactive runs, the script shows what it's about to install, how much disk it'll use, and confirms nothing you index ever leaves the machine. Accept/Decline unlock after a few seconds of read time. Re-runs show the disclaimer again — we never record "yes, I accepted" to a file.
 2. **Admin prompt** (below). You pick the path that fits your situation.
 3. **Install** — package manager or user-local downloads, whichever matches your choice.
-4. **Launch.** The bootstrap ends by starting the server at `http://localhost:8000`. Ctrl-C in the same terminal stops it.
+4. **Launch.** The bootstrap ends by starting the server at `http://localhost:8000`. Ctrl-C in the same terminal stops it. Pass `--no-launch` / `YLJ_NO_LAUNCH=1` to skip auto-launch (useful in CI or scripted setups).
 
-For non-interactive runs (CI, automation), pass `--yes` / `-Yes` (or `YLJ_SKIP_DISCLAIMER=1`) to bypass the disclaimer prompt.
+For non-interactive runs (CI, automation, or POSIX stdin-piped installs such as `curl ... | bash`), the disclaimer prompt may be skipped. You can also bypass it explicitly with `--yes` / `-Yes` (or `YLJ_SKIP_DISCLAIMER=1`).
 
 The first interactive question is:
 
