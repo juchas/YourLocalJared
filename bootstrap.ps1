@@ -56,6 +56,51 @@ function Fail  { param($m) Write-Host "[FAIL]  $m" -ForegroundColor Red; exit 1 
 
 function Have  { param($cmd) [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
+# ── SHA256 verification helpers ─────────────────────────────────────
+# Hash every downloaded binary against the checksum the upstream
+# release published. Mismatch aborts the install — we will not
+# silently run an unexpected binary.
+function Assert-Sha256 {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string] $Expected
+    )
+    if (-not $Expected) {
+        Fail "Missing expected SHA256 for $Path — refusing to run unverified binary."
+    }
+    $actual = (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLower()
+    $exp = $Expected.ToLower()
+    if ($actual -ne $exp) {
+        Fail @"
+SHA256 mismatch for $Path:
+  expected: $exp
+  actual:   $actual
+Aborting install — the download may be corrupted or tampered with.
+"@
+    }
+    Ok "Verified SHA256 of $(Split-Path -Leaf $Path)"
+}
+
+# Look up the expected SHA256 of a specific Ollama release asset from
+# the release's sha256sums.txt. Returns the hex digest or fails.
+function Get-OllamaExpectedSha256 {
+    param([Parameter(Mandatory)] [string] $Asset)
+    $sumsUrl = "https://github.com/ollama/ollama/releases/download/$OllamaTag/sha256sums.txt"
+    try {
+        $resp = Invoke-WebRequest -Uri $sumsUrl -UseBasicParsing
+    } catch {
+        Fail "Could not fetch Ollama checksums from $sumsUrl — refusing to run unverified binary.`n$_"
+    }
+    foreach ($line in ($resp.Content -split "`n")) {
+        $parts = $line.Trim() -split '\s+', 2
+        if ($parts.Count -eq 2) {
+            $file = ($parts[1] -replace '^\./', '')
+            if ($file -eq $Asset) { return $parts[0].ToLower() }
+        }
+    }
+    Fail "Could not find $Asset in $sumsUrl — refusing to run unverified binary."
+}
+
 function Refresh-Path {
     $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $user    = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -160,7 +205,9 @@ function Install-Ollama-User {
     $ollamaExe = Join-Path $UserBin 'ollama.exe'
     if (Test-Path $ollamaExe) { Ok "ollama already installed at $ollamaExe"; return }
     New-Item -ItemType Directory -Path $UserBin -Force | Out-Null
-    $url = "https://github.com/ollama/ollama/releases/download/$OllamaTag/ollama-windows-amd64.zip"
+    $asset = 'ollama-windows-amd64.zip'
+    $url = "https://github.com/ollama/ollama/releases/download/$OllamaTag/$asset"
+    $expected = Get-OllamaExpectedSha256 -Asset $asset
     Info "Downloading Ollama $OllamaTag (windows-amd64, user-local)…"
     $tmp = Join-Path $env:TEMP ("ylj-ollama-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp -Force | Out-Null
@@ -171,6 +218,7 @@ function Install-Ollama-User {
         } catch {
             Fail "Could not download Ollama from $url — check your network and retry.`n$_"
         }
+        Assert-Sha256 -Path $zip -Expected $expected
         Expand-Archive -Path $zip -DestinationPath $tmp -Force
         $extractedBin = Get-ChildItem -Path $tmp -Filter 'ollama.exe' -Recurse -File | Select-Object -First 1
         if (-not $extractedBin) { Fail "Could not find ollama.exe inside the downloaded zip." }
@@ -212,6 +260,15 @@ function Install-Portable-Python-User {
         default { Fail "No portable Python build for Windows $arch. Install Python 3.10+ manually and re-run." }
     }
     $url = "https://github.com/astral-sh/python-build-standalone/releases/download/$PbsDate/cpython-$PbsVersion+$PbsDate-$pbsPlatform-install_only.tar.gz"
+    # python-build-standalone publishes a ".sha256" sidecar per asset,
+    # formatted as "<hash>  <filename>" — same shape as sha256sum output.
+    $shaUrl = "$url.sha256"
+    try {
+        $shaResp = Invoke-WebRequest -Uri $shaUrl -UseBasicParsing
+    } catch {
+        Fail "Could not fetch Python checksum from $shaUrl — refusing to run unverified binary.`n$_"
+    }
+    $expected = ($shaResp.Content.Trim() -split '\s+')[0].ToLower()
     Info "Downloading portable Python $PbsVersion ($pbsPlatform)…"
     New-Item -ItemType Directory -Path $UserPrefix -Force | Out-Null
     $tmp = Join-Path $env:TEMP ("ylj-python-" + [guid]::NewGuid().ToString('N'))
@@ -223,6 +280,7 @@ function Install-Portable-Python-User {
         } catch {
             Fail "Could not download portable Python from $url — check your network and retry.`n$_"
         }
+        Assert-Sha256 -Path $tarball -Expected $expected
         # Windows 10 1803+ ships tar.exe; extract the .tar.gz into $UserPrefix.
         # The archive's top-level is `python/`, so we land at $UserPrefix\python\.
         if (-not (Have tar)) {

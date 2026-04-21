@@ -60,6 +60,32 @@ fail()  { printf "%s[FAIL]%s  %s\n" "$RED"   "$NC" "$*"; exit 1; }
 
 have()  { command -v "$1" >/dev/null 2>&1; }
 
+# ── SHA256 verification helpers ─────────────────────────────────────
+# We hash every downloaded binary against the checksum the upstream
+# release published. A mismatch aborts the install — we won't silently
+# run an unexpected binary. Linux ships `sha256sum`, macOS ships
+# `shasum -a 256`; we detect whichever is available.
+_sha256_of() {
+    if have sha256sum;   then sha256sum "$1" | awk '{print $1}'
+    elif have shasum;    then shasum -a 256 "$1" | awk '{print $1}'
+    else fail "No sha256sum or shasum available — cannot verify downloads."
+    fi
+}
+
+# Verify $1 matches $2 (expected hex). Fails with a clear diff on mismatch.
+_verify_sha256() {
+    local file="$1" expected="$2"
+    if [ -z "$expected" ]; then
+        fail "Missing expected SHA256 for $file — refusing to run unverified binary."
+    fi
+    local actual
+    actual=$(_sha256_of "$file")
+    if [ "$actual" != "$expected" ]; then
+        fail $'SHA256 mismatch for '"$file"$':\n  expected: '"$expected"$'\n  actual:   '"$actual"$'\nAborting install — the download may be corrupted or tampered with.'
+    fi
+    ok "Verified SHA256 of $(basename "$file")"
+}
+
 # ── Mode resolution ─────────────────────────────────────────────────
 MODE=""
 
@@ -217,6 +243,20 @@ setup_linux_system() {
 # Download the Ollama binary into $USER_BIN without touching system paths.
 # The server's _resolve_ollama() already knows to look here, so we don't
 # have to munge the user's shell rc files.
+
+# Look up the expected SHA256 of a specific Ollama release asset from
+# the release's sha256sums.txt manifest. Ollama ships this file for
+# every tagged release, one line per asset: "<hash>  <filename>".
+_ollama_expected_sha256() {
+    local asset="$1"
+    local sums_url="https://github.com/ollama/ollama/releases/download/${OLLAMA_TAG}/sha256sums.txt"
+    local sums
+    if ! sums=$(curl -fsSL "$sums_url"); then
+        fail "Could not fetch Ollama checksums from $sums_url — refusing to run unverified binary."
+    fi
+    printf "%s\n" "$sums" | awk -v f="$asset" '$2==f || $2=="./"f {print $1; exit}'
+}
+
 install_ollama_user_macos() {
     if [ -x "$USER_BIN/ollama" ]; then
         ok "ollama already installed at $USER_BIN/ollama"
@@ -224,13 +264,17 @@ install_ollama_user_macos() {
     fi
     mkdir -p "$USER_BIN"
     info "Downloading Ollama $OLLAMA_TAG (macOS, user-local)…"
-    local url="https://github.com/ollama/ollama/releases/download/${OLLAMA_TAG}/Ollama-darwin.zip"
+    local asset="Ollama-darwin.zip"
+    local url="https://github.com/ollama/ollama/releases/download/${OLLAMA_TAG}/${asset}"
+    local expected
+    expected=$(_ollama_expected_sha256 "$asset")
     local tmp
     tmp=$(mktemp -d)
     trap "rm -rf '$tmp'" RETURN
     if ! curl -fsSL -o "$tmp/ollama.zip" "$url"; then
         fail "Could not download Ollama from $url — check your network and retry."
     fi
+    _verify_sha256 "$tmp/ollama.zip" "$expected"
     (cd "$tmp" && unzip -q ollama.zip)
     # The official macOS bundle carries the CLI binary inside the .app.
     local cli="$tmp/Ollama.app/Contents/Resources/ollama"
@@ -260,13 +304,17 @@ install_ollama_user_linux() {
         *) fail "Unsupported Linux architecture for user-mode Ollama: $ARCH" ;;
     esac
     info "Downloading Ollama $OLLAMA_TAG (linux-$ollama_arch, user-local)…"
-    local url="https://github.com/ollama/ollama/releases/download/${OLLAMA_TAG}/ollama-linux-${ollama_arch}.tgz"
+    local asset="ollama-linux-${ollama_arch}.tgz"
+    local url="https://github.com/ollama/ollama/releases/download/${OLLAMA_TAG}/${asset}"
+    local expected
+    expected=$(_ollama_expected_sha256 "$asset")
     local tmp
     tmp=$(mktemp -d)
     trap "rm -rf '$tmp'" RETURN
     if ! curl -fsSL -o "$tmp/ollama.tgz" "$url"; then
         fail "Could not download Ollama from $url — check your network and retry."
     fi
+    _verify_sha256 "$tmp/ollama.tgz" "$expected"
     (cd "$tmp" && tar -xzf ollama.tgz)
     # Layout inside the tgz is `bin/ollama` + `lib/ollama/...` (gpu runners).
     # Copy the whole tree so GPU runners stay alongside the CLI.
@@ -300,14 +348,22 @@ install_portable_python_posix() {
         *) fail "No portable Python build for $OS/$ARCH. Install Python 3.10+ manually and re-run." ;;
     esac
     local url="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_DATE}/cpython-${PBS_VERSION}+${PBS_DATE}-${pbs_platform}-install_only.tar.gz"
+    # python-build-standalone publishes a `.sha256` sidecar per asset,
+    # formatted as "<hash>  <filename>" — same shape as `sha256sum`.
+    local sha_url="${url}.sha256"
     mkdir -p "$USER_PREFIX"
     info "Downloading portable Python $PBS_VERSION ($pbs_platform)…"
     local tmp
     tmp=$(mktemp -d)
     trap "rm -rf '$tmp'" RETURN
+    local expected
+    if ! expected=$(curl -fsSL "$sha_url" | awk '{print $1; exit}'); then
+        fail "Could not fetch Python checksum from $sha_url — refusing to run unverified binary."
+    fi
     if ! curl -fsSL -o "$tmp/python.tgz" "$url"; then
         fail "Could not download portable Python from $url — check your network and retry."
     fi
+    _verify_sha256 "$tmp/python.tgz" "$expected"
     # The tarball's top-level is `python/`; extracting into $USER_PREFIX
     # produces $USER_PREFIX/python/bin/python3 exactly where we want it.
     (cd "$USER_PREFIX" && tar -xzf "$tmp/python.tgz")
