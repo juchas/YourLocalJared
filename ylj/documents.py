@@ -11,6 +11,13 @@ SUPPORTED_EXTENSIONS = {
     ".csv", ".tsv",
 }
 
+# Extensions the wizard advertises-but-doesn't-index so users with legacy
+# files see them in step-04 (greyed out, "convert to .docx to index")
+# rather than silently wondering why their `.doc` corpus never appears in
+# chat answers. Must stay disjoint from `SUPPORTED_EXTENSIONS` /
+# `PARSERS.keys()` — `tests/test_filetypes_parity.py` enforces that.
+UNSUPPORTED_EXTENSIONS = {".doc", ".rtf"}
+
 # Directories to skip during recursive scanning
 SKIP_DIRS = {
     "node_modules", ".git", ".venv", "venv", "__pycache__", ".tox", ".nox",

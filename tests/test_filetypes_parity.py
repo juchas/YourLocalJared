@@ -18,35 +18,43 @@ from pathlib import Path
 
 import pytest
 
-from ylj.documents import PARSERS
+from ylj.documents import PARSERS, UNSUPPORTED_EXTENSIONS
 
 _DATA_JSX = Path(__file__).resolve().parent.parent / "ylj" / "static" / "src" / "data.jsx"
 
 
-def _extract_filetypes_extensions() -> set[str]:
-    """Pull every ``extensions: [...]`` entry out of FILETYPES.
+def _extract_extensions_from_const(const_name: str) -> set[str]:
+    """Pull every ``extensions: [...]`` entry out of ``const <name> = [ ... ];``.
 
     We parse the literal list directly rather than running Babel — the
-    block is stable and regex-matchable, and this test has to run in the
-    Python-only CI env.
+    blocks are stable and regex-matchable, and this test has to run in
+    the Python-only CI env.
     """
     text = _DATA_JSX.read_text(encoding="utf-8")
-    start = text.find("const FILETYPES")
+    marker = f"const {const_name}"
+    start = text.find(marker)
     if start < 0:
-        pytest.fail("FILETYPES declaration not found in data.jsx")
-    # Grab the array body; FILETYPES closes with a `];` on its own line.
+        pytest.fail(f"{const_name} declaration not found in data.jsx")
+    # Grab the array body; declaration closes with a `];` on its own line.
     end = text.find("];", start)
     if end < 0:
-        pytest.fail("FILETYPES closing `];` not found")
+        pytest.fail(f"{const_name} closing `];` not found")
     body = text[start:end]
-    # Collect every literal inside `extensions: [ ... ]`.
     exts: set[str] = set()
     for match in re.finditer(r"extensions:\s*\[([^\]]*)\]", body):
         for tok in re.findall(r"'([^']+)'", match.group(1)):
             exts.add(tok.lower())
     if not exts:
-        pytest.fail("No extensions parsed out of FILETYPES — regex broke?")
+        pytest.fail(f"No extensions parsed out of {const_name} — regex broke?")
     return exts
+
+
+def _extract_filetypes_extensions() -> set[str]:
+    return _extract_extensions_from_const("FILETYPES")
+
+
+def _extract_unsupported_filetypes_extensions() -> set[str]:
+    return _extract_extensions_from_const("UNSUPPORTED_FILETYPES")
 
 
 def test_every_ui_extension_has_a_backend_parser():
@@ -71,4 +79,30 @@ def test_every_backend_parser_has_a_ui_toggle():
         f"toggle them): {sorted(hidden)}. Add a category in FILETYPES in "
         f"ylj/static/src/data.jsx or remove the parser from "
         f"ylj/documents.py::PARSERS."
+    )
+
+
+def test_unsupported_ui_matches_backend_constant():
+    """The wizard's "not indexed" block must list exactly the extensions
+    the backend counts as unsupported — otherwise either step-04 shows
+    categories step-07 never reports on, or step-07 reports counts the
+    user has no way to understand."""
+    ui = _extract_unsupported_filetypes_extensions()
+    backend = {e.lower() for e in UNSUPPORTED_EXTENSIONS}
+    assert ui == backend, (
+        f"UNSUPPORTED_FILETYPES in data.jsx must match "
+        f"documents.UNSUPPORTED_EXTENSIONS exactly. "
+        f"UI only: {sorted(ui - backend)}. Backend only: {sorted(backend - ui)}."
+    )
+
+
+def test_supported_and_unsupported_are_disjoint():
+    """An extension can't be both parseable and known-unsupported — that
+    would make the 'unsupported' label a lie."""
+    parsers = {k.lower() for k in PARSERS.keys()}
+    backend_unsupported = {e.lower() for e in UNSUPPORTED_EXTENSIONS}
+    overlap = parsers & backend_unsupported
+    assert not overlap, (
+        f"Extensions present in both PARSERS and UNSUPPORTED_EXTENSIONS: "
+        f"{sorted(overlap)}. Pick one."
     )

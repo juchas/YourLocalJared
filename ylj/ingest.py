@@ -149,23 +149,40 @@ def _skip_path(path: Path) -> bool:
     return any(part in SKIP_DIRS or part.endswith(".egg-info") for part in path.parts)
 
 
-def _enumerate_files(dirs: list[Path], allowed_exts: set[str]) -> list[Path]:
+def _enumerate_files(
+    dirs: list[Path],
+    allowed_exts: set[str],
+) -> tuple[list[Path], dict[str, int]]:
+    """Single walk of the selected roots.
+
+    Returns:
+      files — paths matching ``allowed_exts`` (the set we can actually parse).
+      unsupported — ``{ext: count}`` for files under the scanned roots whose
+        extension is in :data:`documents.UNSUPPORTED_EXTENSIONS`. Surfaced in
+        the scan event so the wizard can tell users "you have 42 .doc files
+        we can't index — convert to .docx". We deliberately don't count
+        every unknown extension here (noisy); just the known-unsupported
+        ones we've documented.
+    """
+    from ylj.documents import UNSUPPORTED_EXTENSIONS
+
     seen: set[Path] = set()
     files: list[Path] = []
+    unsupported: dict[str, int] = {}
     for d in dirs:
         d = d.expanduser()
         if not d.exists():
             continue
         for p in sorted(d.rglob("*")):
-            if (
-                p.is_file()
-                and p.suffix.lower() in allowed_exts
-                and not _skip_path(p)
-                and p not in seen
-            ):
-                seen.add(p)
+            if not p.is_file() or _skip_path(p) or p in seen:
+                continue
+            seen.add(p)
+            suffix = p.suffix.lower()
+            if suffix in allowed_exts:
                 files.append(p)
-    return files
+            elif suffix in UNSUPPORTED_EXTENSIONS:
+                unsupported[suffix] = unsupported.get(suffix, 0) + 1
+    return files, unsupported
 
 
 def ingest_stream(
@@ -183,7 +200,8 @@ def ingest_stream(
     vector store, enumeration) terminate with an ``error`` event.
     Event shapes:
         {"phase": "rebuild", "reason": str}                # only when rebuild triggers
-        {"phase": "scan",    "total_files": int, "skipped": int, "orphans": int}
+        {"phase": "scan",    "total_files": int, "skipped": int,
+                             "orphans": int, "unsupported": {ext: count}}
         {"phase": "prune",   "file": str, "deleted": int}  # zero or more
         {"phase": "parse",   "file": str, "chunks": int, "ms": int, "files_done": int}
         {"phase": "skip",    "file": str, "reason": str, "files_done": int}
@@ -224,7 +242,7 @@ def ingest_stream(
 
         ensure_collection()
 
-        files = _enumerate_files(dirs, allowed)
+        files, unsupported = _enumerate_files(dirs, allowed)
         to_process, to_skip = _partition_files(files, manifest)
         orphans = _find_orphans(manifest, dirs) if prune else []
 
@@ -233,6 +251,10 @@ def ingest_stream(
             "total_files": len(to_process),
             "skipped": len(to_skip),
             "orphans": len(orphans),
+            # `.doc` / `.rtf` counts so the wizard can surface a
+            # "you have N files we can't index" banner. Empty dict
+            # when everything is parseable.
+            "unsupported": unsupported,
         }
 
         # Prune orphans before doing any new work, so the index reflects

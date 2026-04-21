@@ -157,6 +157,9 @@ def test_first_run_populates_manifest_and_upserts(fakes, tmp_path):
     done = _by_phase(events, "done")[0]
     assert scan["total_files"] == 2
     assert scan["skipped"] == 0
+    # `unsupported` is always present in the scan event (empty dict when
+    # nothing matches); the UI relies on the key existing.
+    assert scan["unsupported"] == {}
     assert done["files"] == 2
     assert done["skipped"] == 0
     assert fakes["upserts"], "expected upsert_chunks to run at least once"
@@ -164,6 +167,27 @@ def test_first_run_populates_manifest_and_upserts(fakes, tmp_path):
     manifest = json.loads(fakes["manifest_path"].read_text())
     assert manifest["version"] == 1
     assert set(manifest["files"].keys()) == {str(root / "a.txt"), str(root / "b.md")}
+
+
+def test_scan_event_counts_unsupported_files(fakes, tmp_path):
+    """.doc / .rtf files are counted, surfaced to the UI, and NOT passed
+    to the parser. A user with legacy files should see them reflected in
+    the wizard's stats even though they never enter the index."""
+    root = tmp_path / "docs"
+    root.mkdir()
+    _write_text(root / "good.txt", "alpha")
+    # Two .doc + one .rtf — content doesn't matter, we never parse them.
+    _write_text(root / "legacy-1.doc", "junk")
+    _write_text(root / "legacy-2.doc", "junk")
+    _write_text(root / "notes.rtf", "junk")
+
+    events = _drain(ingest_mod.ingest_stream([root]))
+
+    scan = _by_phase(events, "scan")[0]
+    parsed = _by_phase(events, "parse")
+    assert scan["total_files"] == 1, "only the .txt file should enter the parse queue"
+    assert scan["unsupported"] == {".doc": 2, ".rtf": 1}
+    assert [e["file"] for e in parsed] == [str(root / "good.txt")]
 
 
 def test_second_run_skips_unchanged(fakes, tmp_path):

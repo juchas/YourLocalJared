@@ -43,6 +43,17 @@ const FILETYPES = [
   { id: 'csv',  ext: '.csv, .tsv',           label: 'tabular',     count: 0, on: true,  extensions: ['.csv', '.tsv'] },
 ];
 
+// File types we recognise but don't index — surfaced in step-04 as a
+// read-only "not indexed" block so users see their legacy files and know
+// what to convert. Must stay in lockstep with
+// ``ylj.documents.UNSUPPORTED_EXTENSIONS`` (tests/test_filetypes_parity.py).
+const UNSUPPORTED_FILETYPES = [
+  { id: 'doc', ext: '.doc', label: 'word (legacy)',
+    hint: 'convert to .docx to index',     extensions: ['.doc'] },
+  { id: 'rtf', ext: '.rtf', label: 'rich text',
+    hint: 'save as .txt or .docx to index', extensions: ['.rtf'] },
+];
+
 function computeFileTypeCounts(folders, fileTypes) {
   // Sum folder.extensions across selected folders into each category's count.
   // If no selected folder has extensions data yet, preserve the fallback
@@ -82,4 +93,9 @@ const EMBEDDERS = [
   { id: 'all-minilm',  hfId: 'sentence-transformers/all-MiniLM-L6-v2', name: 'all-MiniLM-L6',     dims: 384,  sizeGB: 0.09, desc: 'sbert · classic, tiny',       rec: false },
 ];
 
-Object.assign(window, { HARDWARE, FOLDERS, IGNORES, FILETYPES, LLMS, EMBEDDERS, computeFileTypeCounts });
+Object.assign(window, {
+  HARDWARE, FOLDERS, IGNORES,
+  FILETYPES, UNSUPPORTED_FILETYPES,
+  LLMS, EMBEDDERS,
+  computeFileTypeCounts,
+});

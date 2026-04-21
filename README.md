@@ -135,6 +135,16 @@ Browser (chat.html, onboarding.html) ─── fetch ──▶ FastAPI server (y
                                                      └── Folder scanner (ylj/scanner.py)
 ```
 
+## File types
+
+What the wizard's step 04 toggles and the ingest pipeline actually parses:
+
+| Supported (indexable) | Recognised but **not** indexed |
+| --- | --- |
+| `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.txt`, `.md`, `.markdown`, `.mdx`, `.csv`, `.tsv` | `.doc`, `.rtf` |
+
+`.doc` and `.rtf` are counted during the scan and shown in both step 04 ("not indexed" block) and step 07 (warning line on the ingest screen) so you can see they exist — convert to `.docx` / `.txt` to include them. There's no silent drop: if a file type isn't in either list above, it simply isn't surfaced at all.
+
 ## Configuration
 
 All settings are env vars, prefixed `YLJ_`. Defaults live in `ylj/config.py`.

@@ -23,6 +23,10 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
   const [chunksDone, setChunksDone] = useState(0);
   const [skipped, setSkipped] = useState(0);
   const [orphans, setOrphans] = useState(0);
+  // Map of `{ext: count}` for file types we recognise but don't parse
+  // (e.g. .doc). Reported once per run as part of the scan event so the
+  // UI can render a "N .doc / .rtf files — convert to index" hint.
+  const [unsupported, setUnsupported] = useState({});
   const [pruned, setPruned] = useState(0);
   const [failed, setFailed] = useState(0);
   const [rebuild, setRebuild] = useState(false);
@@ -53,6 +57,7 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
     setChunksDone(0);
     setSkipped(0);
     setOrphans(0);
+    setUnsupported({});
     setPruned(0);
     setFailed(0);
     setDone(false);
@@ -73,6 +78,12 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
           setTotalFiles(Math.max(1, ev.total_files | 0));
           setSkipped(ev.skipped | 0);
           setOrphans(ev.orphans | 0);
+          // `unsupported` is a new field (added alongside step-04's
+          // "not indexed" block). Guard the read so pre-bump servers
+          // that don't emit it keep working.
+          if (ev.unsupported && typeof ev.unsupported === 'object') {
+            setUnsupported(ev.unsupported);
+          }
           break;
         case 'prune':
           setPruned(p => p + 1);
@@ -312,6 +323,23 @@ function ScreenIngest({ onNext, onBack, folders, fileTypes }) {
                 {pruned === 0 && orphans > 0 && <span>{orphans.toLocaleString()} orphaned</span>}
               </div>
             )}
+            {(() => {
+              const exts = Object.keys(unsupported || {});
+              const total = exts.reduce((a, e) => a + (unsupported[e] | 0), 0);
+              if (total === 0) return null;
+              // Dim-warn — the files aren't errors (we chose not to
+              // parse them), but the user should know they exist. Same
+              // hint a user sees on step 04's "not indexed" block, so
+              // the two surfaces reinforce each other.
+              return (
+                <div
+                  title={`convert ${exts.join(' / ')} to .docx or .txt to index them`}
+                  style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--warn, #c97d17)', marginBottom: 14, fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {total.toLocaleString()} unsupported · {exts.join(' / ')}
+                </div>
+              );
+            })()}
             <div style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-dimmer)', marginBottom: 8 }}>pipeline</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {phases.map((ph, i) => {
