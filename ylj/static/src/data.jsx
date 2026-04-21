@@ -27,15 +27,20 @@ const IGNORES = ['node_modules', '.git', '.venv', '__pycache__', '*.log', 'dist'
 // `count` is computed live from folder.extensions at render time, so the
 // hardcoded numbers here are only used as a fallback before the first
 // folder scan completes.
+//
+// The extension list below MUST stay a subset of `ylj.documents.PARSERS`
+// in the backend — otherwise toggling a category does nothing at ingest
+// time because the server takes the intersection of UI-enabled exts and
+// parser keys. `tests/test_filetypes_parity.py` enforces this bijection
+// on every commit.
 const FILETYPES = [
-  { id: 'md',   ext: '.md, .markdown, .mdx',                      label: 'markdown',    count: 0, on: true,  extensions: ['.md', '.markdown', '.mdx'] },
-  { id: 'txt',  ext: '.txt',                                      label: 'plain text',  count: 0, on: true,  extensions: ['.txt'] },
-  { id: 'pdf',  ext: '.pdf',                                      label: 'pdf',         count: 0, on: true,  extensions: ['.pdf'] },
-  { id: 'docx', ext: '.docx, .doc',                               label: 'word',        count: 0, on: true,  extensions: ['.docx', '.doc'] },
-  { id: 'code', ext: '.py, .js, .ts, .go, .rs, .java, .rb',       label: 'source code', count: 0, on: false, extensions: ['.py', '.js', '.ts', '.tsx', '.jsx', '.go', '.rs', '.java', '.rb', '.c', '.cpp', '.h'] },
-  { id: 'html', ext: '.html, .htm',                               label: 'html',        count: 0, on: false, extensions: ['.html', '.htm'] },
-  { id: 'csv',  ext: '.csv, .tsv',                                label: 'tabular',     count: 0, on: false, extensions: ['.csv', '.tsv', '.xlsx'] },
-  { id: 'epub', ext: '.epub',                                     label: 'ebooks',      count: 0, on: false, extensions: ['.epub'] },
+  { id: 'md',   ext: '.md, .markdown, .mdx', label: 'markdown',    count: 0, on: true,  extensions: ['.md', '.markdown', '.mdx'] },
+  { id: 'txt',  ext: '.txt',                 label: 'plain text',  count: 0, on: true,  extensions: ['.txt'] },
+  { id: 'pdf',  ext: '.pdf',                 label: 'pdf',         count: 0, on: true,  extensions: ['.pdf'] },
+  { id: 'docx', ext: '.docx',                label: 'word',        count: 0, on: true,  extensions: ['.docx'] },
+  { id: 'xlsx', ext: '.xlsx',                label: 'excel',       count: 0, on: true,  extensions: ['.xlsx'] },
+  { id: 'pptx', ext: '.pptx',                label: 'powerpoint',  count: 0, on: true,  extensions: ['.pptx'] },
+  { id: 'csv',  ext: '.csv, .tsv',           label: 'tabular',     count: 0, on: true,  extensions: ['.csv', '.tsv'] },
 ];
 
 function computeFileTypeCounts(folders, fileTypes) {
